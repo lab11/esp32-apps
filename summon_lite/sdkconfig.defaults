@@ -1,6 +1,11 @@
-# Override some defaults so BT stack is enabled
-# and WiFi disabled by default in this example
+# Auto-detect crystal frequency
+CONFIG_ESP32_XTAL_FREQ_AUTO=y
+CONFIG_ESP32_XTAL_FREQ=0
+
+# Enable BLE
 CONFIG_BT_ENABLED=y
+
+# Specify custom partitions (app requires extra memory)
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_CUSTOM_APP_BIN_OFFSET=0x10000
