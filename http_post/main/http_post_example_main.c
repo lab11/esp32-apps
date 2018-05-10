@@ -166,11 +166,13 @@ static void http_post_task(void *pvParameters)
 
         ESP_LOGI(TAG, "... done reading from socket. Last read return=%d errno=%d\r\n", r, errno);
         close(s);
+        ESP_ERROR_CHECK( esp_wifi_stop() );
         for(int countdown = 10; countdown >= 0; countdown--) {
             ESP_LOGI(TAG, "%d... ", countdown);
             vTaskDelay(1000 / portTICK_PERIOD_MS);
         }
         ESP_LOGI(TAG, "Starting again!");
+        ESP_ERROR_CHECK( esp_wifi_start() );
     }
 }
 
