@@ -1,0 +1,3 @@
+# Auto-detect crystal frequency
+CONFIG_ESP32_XTAL_FREQ_AUTO=y
+CONFIG_ESP32_XTAL_FREQ=0
