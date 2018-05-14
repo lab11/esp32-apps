@@ -65,11 +65,17 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
             switch(scan_result->scan_rst.search_evt)
             {
                 case ESP_GAP_SEARCH_INQ_RES_EVT: {
-                    // Print advertisement:
+                    /* Convert advertisement to hex string */
+                    char DATA[scan_result->scan_rst.adv_data_len*2];
+                    for (int i = 0; i < scan_result->scan_rst.adv_data_len; i++) {
+                        sprintf(DATA+2*i, "%02x ", scan_result->scan_rst.ble_adv[i]);
+                    }
+
+                    /* Print advertisement */
                     ESP_LOGI(TAG, "--------Device Found----------");
                     esp_log_buffer_hex("SCAN: ADDR", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
-                    ESP_LOGI(TAG, "RSSI:%d dbm", scan_result->scan_rst.rssi);
-                    esp_log_buffer_hex("SCAN: DATA", scan_result->scan_rst.ble_adv, scan_result->scan_rst.adv_data_len);
+                    ESP_LOGI(TAG, "RSSI: %d dbm", scan_result->scan_rst.rssi);
+                    ESP_LOGI(TAG, "DATA: %s", DATA);
                 }
                 default:
                     break;
