@@ -44,9 +44,6 @@ const int CONNECTED_BIT = BIT0;
 
 static const char *TAG = "example";
 
-// static const char *PACKET = WEB_SERVER " " WEB_PORT " test ";
-
-
 static esp_err_t event_handler(void *ctx, system_event_t *event)
 {
     switch(event->event_id) {
@@ -89,26 +86,40 @@ static void initialise_wifi(void)
 
 static void udp_send_task(void *pvParameters)
 {
-
-        struct udp_pcb *ptel_pcb;
-        char msg[]="testing";
+        struct udp_pcb *pcb;
         struct pbuf *p;
+        ip_addr_t addr;
+        err_t err;
+        char msg[] = "testing\n";
+        
+        pcb = udp_new();
 
-        ptel_pcb = udp_new();
+        if (ipaddr_aton(WEB_SERVER, &addr)) {
+            while (1){
+                /* Wait for connection */
+                xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, portMAX_DELAY);
 
-        // udp_bind(ptel_pcb, WEB_SERVER, WEB_PORT);
-        // udp_recv(ptel_pcb, udp_echo_recv, NULL);
-
-        while (1){
-               //Allocate packet buffer
+                /* Allocate packet and copy message */
                 p = pbuf_alloc(PBUF_TRANSPORT,sizeof(msg),PBUF_RAM);
                 memcpy (p->payload, msg, sizeof(msg));
-                udp_sendto(ptel_pcb, p, (const ip_addr_t *) WEB_SERVER, WEB_PORT);
-                ESP_LOGI(TAG, "Sent 'testing'... to %s %d",WEB_SERVER,WEB_PORT);
-                pbuf_free(p); //De-allocate packet buffer
-                vTaskDelay( 1000 ); //some delay!
-        } 
-        
+
+                /* Send UDP packet */
+                err = udp_sendto(pcb, p, &addr, WEB_PORT);
+                if (err == ERR_OK) {
+                    ESP_LOGI(TAG, "Sent UDP packet to %s:%d : %s",WEB_SERVER,WEB_PORT,msg);
+                } else {
+                    ESP_LOGE(TAG, "lwIP UDP Send Error (%d)", err);
+                }
+
+                /* De-allocate, delay, and repeat */
+                pbuf_free(p);
+                vTaskDelay(2000 / portTICK_PERIOD_MS);
+            } 
+        } else {
+            /* Error if IP address is invalid */
+            ESP_LOGE(TAG,"Bad Target Address: %s",WEB_SERVER);
+            vTaskDelay(10000 / portTICK_PERIOD_MS); 
+        }
 }
 
 void app_main()
