@@ -1,0 +1,32 @@
+menu "Wi-Fi Configuration"
+
+config WIFI_SSID
+    string "Wi-Fi SSID"
+	default "myssid"
+	help
+		SSID (network name) for the app to connect to.
+
+config WIFI_PASSWORD
+    string "Wi-Fi Password"
+	default "mypassword"
+	help
+		Wi-Fi password (WPA or WPA2) for the app to use.
+
+		Can be left blank if the network has no security set.
+
+endmenu
+
+menu "UDP Endpoint"
+
+	config UDP_ADDR
+	string "Endpoint Address"
+	default "0.0.0.1"
+	help
+		UDP Address
+	
+	config UDP_PORT
+	int "Endpoint Port"
+	default 1000
+	help
+		UDP Port
+endmenu
