@@ -1,7 +1,11 @@
 # UDP Send
 
-Periodically sends a UDP packet.
-
-The example sends a periodic UDP packet to a specified endpoint. 
+The example periodically sends a UDP packet to a specified endpoint. 
 
 Make sure to specify the target UDP address and port, as well as the Wi-Fi network and password, in the configuration menu.
+
+To set up a test UDP endpoint on your machine, you can use netcat:
+
+    nc -u -l <PORT NUMBER>
+
+Then, add your IP address and the port number you specified above in the UDP Endpoint setting of the configuration menu.
