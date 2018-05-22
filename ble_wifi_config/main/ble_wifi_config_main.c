@@ -21,6 +21,7 @@
 #include "freertos/event_groups.h"
 #include "esp_system.h"
 #include "esp_wifi.h"
+#include "esp_event_loop.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
@@ -115,6 +116,110 @@ static prepare_type_env_t a_prepare_write_env;
 
 char wifi[32] = "No WiFi";
 char pass[32] = "";
+
+#define WIFI_LIST_NUM   10
+
+static wifi_config_t sta_config;
+
+/* FreeRTOS event group to signal when we are connected & ready to make a request */
+static EventGroupHandle_t wifi_event_group;
+
+/* The event group allows multiple bits for each event,
+   but we only care about one event - are we connected
+   to the AP with an IP? */
+const int CONNECTED_BIT = BIT0;
+
+/* store the station info for send back to phone */
+static bool gl_sta_connected = false;
+static uint8_t gl_sta_bssid[6];
+static uint8_t gl_sta_ssid[32];
+static int gl_sta_ssid_len;
+
+/* connect infor*/
+static uint8_t server_if;
+static uint16_t conn_id;
+static esp_err_t example_net_event_handler(void *ctx, system_event_t *event)
+{
+    wifi_mode_t mode;
+
+    switch (event->event_id) {
+    case SYSTEM_EVENT_STA_START:
+        esp_wifi_connect();
+        break;
+    case SYSTEM_EVENT_STA_GOT_IP: {
+        xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
+        esp_wifi_get_mode(&mode);
+        break;
+    }
+    case SYSTEM_EVENT_STA_CONNECTED:
+        gl_sta_connected = true;
+        memcpy(gl_sta_bssid, event->event_info.connected.bssid, 6);
+        memcpy(gl_sta_ssid, event->event_info.connected.ssid, event->event_info.connected.ssid_len);
+        gl_sta_ssid_len = event->event_info.connected.ssid_len;
+        break; 
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        /* This is a workaround as ESP32 WiFi libs don't currently
+           auto-reassociate. */
+        gl_sta_connected = false;
+        memset(gl_sta_ssid, 0, 32);
+        memset(gl_sta_bssid, 0, 6);
+        gl_sta_ssid_len = 0;
+        esp_wifi_connect();
+        xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
+        break;
+    case SYSTEM_EVENT_AP_START:
+        esp_wifi_get_mode(&mode);
+        break;
+    case SYSTEM_EVENT_SCAN_DONE: {
+        uint16_t apCount = 0;
+        esp_wifi_scan_get_ap_num(&apCount);
+        if (apCount == 0) {
+            ESP_LOGI(GATTS_TAG, "No AP found");
+            break;
+        }
+        wifi_ap_record_t *ap_list = (wifi_ap_record_t *)malloc(sizeof(wifi_ap_record_t) * apCount);
+        if (!ap_list) {
+            ESP_LOGE(GATTS_TAG, "malloc error, ap_list is NULL");
+            break;
+        }
+        ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&apCount, ap_list));
+        // esp_blufi_ap_record_t * blufi_ap_list = (esp_blufi_ap_record_t *)malloc(apCount * sizeof(esp_blufi_ap_record_t));
+        // if (!blufi_ap_list) {
+        //     if (ap_list) {
+        //         free(ap_list);
+        //     }
+        //     BLUFI_ERROR("malloc error, blufi_ap_list is NULL");
+        //     break;
+        // }
+        // for (int i = 0; i < apCount; ++i)
+        // {
+        //     blufi_ap_list[i].rssi = ap_list[i].rssi;
+        //     memcpy(blufi_ap_list[i].ssid, ap_list[i].ssid, sizeof(ap_list[i].ssid));
+        // }
+        // esp_blufi_send_wifi_list(apCount, blufi_ap_list);
+        esp_wifi_scan_stop();
+        free(ap_list);
+        // free(blufi_ap_list);
+        break;
+    }
+    default:
+        break;
+    }
+    return ESP_OK;
+}
+
+static void initialize_wifi(void)
+{
+    tcpip_adapter_init();
+    wifi_event_group = xEventGroupCreate();
+    ESP_ERROR_CHECK( esp_event_loop_init(example_net_event_handler, NULL) );
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
+    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
+    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
+    ESP_ERROR_CHECK( esp_wifi_start() );
+}
+
 
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
     switch (event) {
@@ -249,6 +354,10 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             const char* value = (const char*) param->write.value;
             strcpy(wifi,value);
             strcpy(pass,value+strlen(value)+1);
+            strcpy((char*)sta_config.sta.ssid, (char*)wifi);
+            strcpy((char*)sta_config.sta.password, (char*)pass);
+            esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+            esp_wifi_connect();
             if (gl_profile_tab[PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2){
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
                 if (descr_value == 0x0001){
@@ -413,6 +522,8 @@ void app_main() {
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    initialize_wifi();
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
