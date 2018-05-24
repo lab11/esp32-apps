@@ -62,11 +62,14 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
                 case ESP_GAP_SEARCH_INQ_RES_EVT: {
                 /* If device is ours (by address), print useful portions of advertisement */
                     uint8_t *bda = scan_result->scan_rst.bda;
-                    if (bda[0]==0xC0 && bda[1]==0x98 && bda[2]==0xE5 && bda[3]==0x77) {
+                    if (bda[0]==0xC0 && bda[1]==0x98 && bda[2]==0xE5 && bda[3]==0x00 && bda[4]==0x77) {
                         uint8_t *adv = scan_result->scan_rst.ble_adv;
-                        printf("%02x %02x%02x %02x%02x%02x%02x\n", 
-                        /* address, advert interval, counter */ 
-                            bda[5],  adv[10],adv[9],  adv[18],adv[17],adv[16],adv[15]);
+                        uint16_t interval = ((adv[10] << 8) | adv[9]) * 5 / 8;
+                        uint32_t counter =  ((adv[18] << 24) | (adv[17] << 16) | (adv[16] << 8) | (adv[15]));
+                        printf("%02x%02x%02x%02x%02x%02x,%d,%d\n",
+                            bda[0], bda[1], bda[2], bda[3], bda[4], bda[5], // address
+                            counter, // sequence number
+                            interval); // advertisement interval
                     }
                 }
                 default:
@@ -117,4 +120,5 @@ void app_main() {
 
     /* set scan parameters */
     esp_ble_gap_set_scan_params(&ble_scan_params);
+    printf("Staring!\n");
 }
