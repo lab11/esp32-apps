@@ -36,7 +36,7 @@
 
 #define TAG "BLE_WIFI_CONFIG"
 
-#define TEST_DEVICE_NAME            "ESP_WIFI"
+#define DEVICE_NAME            "ESP_WIFI"
 
 #define GATTS_DEMO_CHAR_VAL_LEN_MAX 0x40
 
@@ -52,8 +52,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 uint8_t char1_str[] = {0x11,0x22,0x33};
 esp_gatt_char_prop_t a_property = 0;
 
-esp_attr_value_t gatts_demo_char1_val =
-{
+esp_attr_value_t gatts_demo_char1_val = {
     .attr_max_len = GATTS_DEMO_CHAR_VAL_LEN_MAX,
     .attr_len     = sizeof(char1_str),
     .attr_value   = char1_str,
@@ -68,8 +67,8 @@ static uint8_t raw_adv_data[] = {
     0x02, 0x01, 0x06,
     /* URL Service UUID (FEAA) */
     0x03, 0x03, 0xAA, 0xFE,
-    /* URL Service Data (http://goo.gl) */
-    0x13, 0x16, 0xAA, 0xFE, 0x10, 0x20, 0x02, 'g', 'o', 'o', '.', 'g', 'l', '/', 'i', 'r', 'c', 'R', 'z', 'c'
+    /* URL Service Data (https://goo.gl/ircRzc) */
+    0x13, 0x16, 0xAA, 0xFE, 0x10, 0x20, 0x03, 'g', 'o', 'o', '.', 'g', 'l', '/', 'i', 'r', 'c', 'R', 'z', 'c'
 };
 
 static esp_ble_adv_params_t adv_params = {
@@ -114,8 +113,7 @@ typedef struct {
 
 static prepare_type_env_t a_prepare_write_env;
 
-char wifi[32] = "No WiFi";
-char pass[32] = "";
+char wifi[32] = "";
 
 #define WIFI_LIST_NUM   10
 
@@ -136,7 +134,7 @@ static uint8_t gl_sta_ssid[32];
 static int gl_sta_ssid_len;
 
 /* Wi-Fi Event Handlers */
-static esp_err_t example_net_event_handler(void *ctx, system_event_t *event)
+static esp_err_t net_event_handler(void *ctx, system_event_t *event)
 {
     wifi_mode_t mode;
 
@@ -147,6 +145,8 @@ static esp_err_t example_net_event_handler(void *ctx, system_event_t *event)
     case SYSTEM_EVENT_STA_GOT_IP: {
         xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
         esp_wifi_get_mode(&mode);
+        strcpy(wifi, (char*)sta_config.sta.ssid);
+        esp_ble_gatts_close(gl_profile_tab[PROFILE_A_APP_ID].gatts_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id);
         break;
     }
     case SYSTEM_EVENT_STA_CONNECTED:
@@ -162,6 +162,7 @@ static esp_err_t example_net_event_handler(void *ctx, system_event_t *event)
         memset(gl_sta_ssid, 0, 32);
         memset(gl_sta_bssid, 0, 6);
         gl_sta_ssid_len = 0;
+        strcpy(wifi,"");
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
         break;
@@ -192,7 +193,7 @@ static void initialize_wifi(void)
 {
     tcpip_adapter_init();
     wifi_event_group = xEventGroupCreate();
-    ESP_ERROR_CHECK( esp_event_loop_init(example_net_event_handler, NULL) );
+    ESP_ERROR_CHECK( esp_event_loop_init(net_event_handler, NULL) );
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
     ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
@@ -236,7 +237,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
-void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param) {
+void write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param) {
     esp_gatt_status_t status = ESP_GATT_OK;
     if (param->write.need_rsp){
         if (param->write.is_prep){
@@ -280,7 +281,7 @@ void example_write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare
     }
 }
 
-void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param) {
+void exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param) {
     if (param->exec_write.exec_write_flag == ESP_GATT_PREP_WRITE_EXEC){
         esp_log_buffer_hex(TAG, prepare_write_env->prepare_buf, prepare_write_env->prepare_len);
     } else {
@@ -302,7 +303,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_TEST_A;
 
-        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(TEST_DEVICE_NAME);
+        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(DEVICE_NAME);
         if (set_dev_name_ret){
             ESP_LOGE(TAG, "set device name failed, error code = %x", set_dev_name_ret);
         }
@@ -317,14 +318,13 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         ESP_LOGI(TAG, "GATT_READ_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
-        // char status[7] = "No WiFi";
         rsp.attr_value.handle = param->read.handle;
         rsp.attr_value.len = strlen(wifi);
+        ESP_LOGI(TAG, "Sending: %s", wifi);
         for (int i=0; i<strlen(wifi); i++) {
             rsp.attr_value.value[i] = wifi[i];
         }
-        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
-                                    ESP_GATT_OK, &rsp);
+        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
         break;
     }
     case ESP_GATTS_WRITE_EVT: {
@@ -332,13 +332,6 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         if (!param->write.is_prep){
             ESP_LOGI(TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
             esp_log_buffer_hex(TAG, param->write.value, param->write.len);
-            const char* value = (const char*) param->write.value;
-            strcpy(wifi,value);
-            strcpy((char*)sta_config.sta.ssid, (char*)wifi);
-            strcpy((char*)sta_config.sta.password, (char*)wifi+strlen(wifi)+1);
-            ESP_LOGI(TAG, "Received %s:%s",value,value+strlen(value)+1);
-            esp_wifi_set_config(WIFI_IF_STA, &sta_config);
-            esp_wifi_connect();
             if (gl_profile_tab[PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2){
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
                 if (descr_value == 0x0001){
@@ -368,20 +361,29 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                     esp_log_buffer_hex(TAG, param->write.value, param->write.len);
                 }
 
+            } else {
+                char* value = (char*) param->write.value;
+                if (strcmp(value,wifi)) {
+                    strcpy((char*)sta_config.sta.ssid, value);
+                    strcpy((char*)sta_config.sta.password, value+strlen(value)+1);
+                    ESP_LOGI(TAG, "Attempting to connect to '%s'", value);
+                    esp_wifi_set_config(WIFI_IF_STA, &sta_config);
+                    esp_wifi_connect();
+                } else {
+                    esp_ble_gatts_close(gatts_if,param->write.conn_id);
+                }
             }
         }
-        example_write_event_env(gatts_if, &a_prepare_write_env, param);
+        write_event_env(gatts_if, &a_prepare_write_env, param);
         break;
     }
     case ESP_GATTS_EXEC_WRITE_EVT:
         ESP_LOGI(TAG,"ESP_GATTS_EXEC_WRITE_EVT");
         esp_ble_gatts_send_response(gatts_if, param->write.conn_id, param->write.trans_id, ESP_GATT_OK, NULL);
-        example_exec_write_event_env(&a_prepare_write_env, param);
+        exec_write_event_env(&a_prepare_write_env, param);
         break;
     case ESP_GATTS_MTU_EVT:
         ESP_LOGI(TAG, "ESP_GATTS_MTU_EVT, MTU %d", param->mtu.mtu);
-        break;
-    case ESP_GATTS_UNREG_EVT:
         break;
     case ESP_GATTS_CREATE_EVT:
         ESP_LOGI(TAG, "CREATE_SERVICE_EVT, status %d,  service_handle %d\n", param->create.status, param->create.service_handle);
@@ -430,8 +432,6 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         gl_profile_tab[PROFILE_A_APP_ID].descr_handle = param->add_char_descr.attr_handle;
         ESP_LOGI(TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d\n",
                  param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
-        break;
-    case ESP_GATTS_DELETE_EVT:
         break;
     case ESP_GATTS_START_EVT:
         ESP_LOGI(TAG, "SERVICE_START_EVT, status %d, service_handle %d\n",

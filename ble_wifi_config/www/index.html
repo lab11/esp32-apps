@@ -6,25 +6,32 @@
     <link rel='shortcut icon' href='favicon.png'>
     <style>
       * {color:#fff; font-family:monospace; text-align:center;}
+      div {font-size:3vh;}
       body {background:#f44336;}
-      input {background:rgba(0,0,0,.2); width:90vw; height:8vh; font-size:4vh; margin:5vh 0 0; border:none; outline:none;}
-      #conn {background:rgba(255,255,255,.2); -webkit-appearance: none;}
-      #cover {background:rgba(244,67,54,.8); height:45vh; width:100vw; position:absolute;}
+      input {background:rgba(0,0,0,.2); width:90vw; height:8vh; font-size:4vh; margin:5vh 0 0; border:none; outline:none; -webkit-appearance: none;}
+      fieldset {border:none;}
+      fieldset:disabled {opacity:.5}
+      #conn {background:rgba(255,255,255,.2);}
+      #title {margin:20vh 0 0; font-size:5vh;}
+      #console {padding:3vh;}
       ::placeholder {color:rgba(255,255,255,.8); margin:10vh 0 0}
     </style>
   </head>
   <body>
-    <div style='margin:20vh 0 0; font-size:5vh;'>ESP32 WiFi</div>
-    <div id='address' style='font-size:3vh;'>[device]</div>
-    <div id='console' style='font-size:3vh; height:6vh'>(Loading...)</div>
-    <div id='cover'></div>
-    <input id='ssid' type='text' placeholder='Network Name'/> 
-    <input id='pass' type='password' placeholder='Password'/> 
-    <input id='conn' type='button' value='Connect'/>
+    <div id='title'>ESP32 WiFi</div>
+    <div id='address'>[device]</div>
+    <div id='console'>(Loading...)</div>
+    <form>
+      <fieldset>
+        <input id='ssid' type='text' placeholder='Network Name'/> 
+        <input id='pass' type='password' placeholder='Password'/> 
+        <input id='conn' type='submit' value='Connect'/>
+      </fieldset>
+    </form>
     <script type='text/javascript'>
       var esp = {
-        service: 'FF10',                                                                                   // service uuid
-        wifi: 'FF11',                                                                                      // characteristic uuid
+        service: 'FF10',                                                                       // service uuid
+        wifi: 'FF11',                                                                          // characteristic uuid
       };
       var app = {
         initialize: () => {
@@ -32,46 +39,45 @@
           document.addEventListener('resume', app.onAppReady, false);
           document.addEventListener('pause', app.onPause, false);
           window.addEventListener('beforeunload', app.onPause, false);
-          document.querySelector('#conn').addEventListener('click', app.onPress, false);                   // if button pressed, goto: onPress
+          document.querySelector('form').addEventListener('submit', app.onSubmit, false);      // if button pressed, goto: onPress
         },
         onAppReady: () => {
           document.querySelector('#address').innerHTML = esp.id = bluetooth.getDeviceId();
-          document.querySelector('#cover').style.display = 'block';                                        // start in 'disconnected' mode
-          console.log('App ready')
-          bluetooth.isEnabled(app.onEnable, () => { app.log('Bluetooth Off') });                           // if BLE enabled, goto: onEnable
+          document.querySelector('fieldset').disabled = true;                                  // start in 'disconnected' mode
+          bluetooth.isEnabled(app.onEnable, () => { app.log('Bluetooth Off'); });              // if BLE enabled, goto: onEnable
         },
         onEnable: () => {
           app.log('Searching...');
-          bluetooth.connectDevice(app.onConnect, app.onAppReady);                                          // start BLE scan; if device connected, goto: onConnect
+          bluetooth.connectDevice(app.onConnect, app.onAppReady);                              // start BLE scan; if device connected, goto: onConnect
         },
         onConnect: (device) => {
           app.log('Syncing...');
-          bluetooth.startNotification(esp.id, esp.service, esp.wifi, app.onRead, app.onRWError);
-          bluetooth.read(esp.id, esp.service, esp.wifi, app.onRead, app.onRWError);                        // read characteristic; if read is good, goto: onRead 
+          // bluetooth.startNotification(esp.id, esp.service, esp.wifi, app.onRead, app.onError);
+          bluetooth.read(esp.id, esp.service, esp.wifi, app.onRead, app.onError);              // read characteristic; if read is good, goto: onRead 
         },
         onRead: (data) => {
-          document.querySelector('#cover').style.display = 'none';
-          if (data.byteLength) {
-            var value = new TextDecoder().decode(new Uint8Array(data));
-            app.log('Connected to <i>' + value + '</i>');
+          document.querySelector('fieldset').disabled = false;
+          if (data.byteLength > 1) {
+            app.log('Connected to <b>' +  TextDecoder().decode(data) + '</b>');
           } else {
-            app.log('Not Connected to WiFi')
+            app.log('Not Connected to WiFi');
           }
         },
-        onPress: (event) => {
+        onSubmit: (event) => {
+            event.preventDefault();
             var ssid = document.querySelector('#ssid').value;
             var pass = document.querySelector('#pass').value;
-            try { data = new TextEncoder().encode( ssid + '\0' + pass ); } 
-            catch(e) { app.log('Invalid Entry. Try again...'); }
-            app.log('Attempting connection...')
-            bluetooth.write(esp.id, esp.service, esp.wifi, data.buffer, null, app.onRWError);  // write switch characteristic; if good, goto: onRead
+            try {
+              var data = new TextEncoder().encode( ssid + '\0' + pass ); 
+              app.log('Attempting connection...');
+              bluetooth.write(esp.id, esp.service, esp.wifi, data.buffer, null, app.onError);  // write characteristicz
+            } catch(e) { app.log('Invalid Entry. Try again...'); }
         },
-        onPause: () => {                                                                                   // if user leaves app, stop BLE
+        onPause: () => {                                                                       // if user leaves app, stop BLE
           bluetooth.disconnectDevice();
           bluetooth.stopScan();
         },
-        onRWError: () => {                                                                                 // on error, try restarting BLE
-          console.log('RW ERROR');
+        onError: () => {                                                                       // on error, try restarting BLE
           bluetooth.isEnabled(esp.id, null, app.onAppReady);
           bluetooth.isConnected(esp.id, null, app.onAppReady);
         },
@@ -79,7 +85,7 @@
           document.querySelector('#console').innerHTML = '(' + message + ')';
         }
       };
-      app.initialize();                                                                                    // start the app
+      app.initialize();                                                                        // start the app
     </script>
   </body>
 </html>
