@@ -2,78 +2,84 @@
 <html>
   <head>
     <title>ESP32 WiFi</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="shortcut icon" href="favicon.png">
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <link rel='shortcut icon' href='favicon.png'>
     <style>
-      * {font-family:monospace; text-align:center; color:#fff;}
+      * {color:#fff; font-family:monospace; text-align:center;}
       body {background:#f44336;}
       input {background:rgba(0,0,0,.2); width:90vw; height:8vh; font-size:4vh; margin:5vh 0 0; border:none; outline:none;}
-      #conn {background:rgba(255,255,255,.2);}
+      #conn {background:rgba(255,255,255,.2); -webkit-appearance: none;}
       #cover {background:rgba(244,67,54,.8); height:45vh; width:100vw; position:absolute;}
       ::placeholder {color:rgba(255,255,255,.8); margin:10vh 0 0}
     </style>
   </head>
   <body>
-    <div style="margin:20vh 0 0; font-size:5vh;">ESP32 WiFi</div>
-    <div id="address" style="font-size:3vh;">[device]</div>
-    <div id="console" style="font-size:3vh; height:6vh">(Pairing...)</div>
-    <div id="cover"></div>
-    <input id="ssid" type="text" placeholder="SSID"/> 
-    <input id="pass" type="password" placeholder="Password"/> 
-    <input id="conn" type="button" value="Connect"/>
-    <div style="margin:10vh 0" id="status"></div>
-    <div></div>
-    <script type="text/javascript">
-      var deviceID = "";
+    <div style='margin:20vh 0 0; font-size:5vh;'>ESP32 WiFi</div>
+    <div id='address' style='font-size:3vh;'>[device]</div>
+    <div id='console' style='font-size:3vh; height:6vh'>(Loading...)</div>
+    <div id='cover'></div>
+    <input id='ssid' type='text' placeholder='Network Name'/> 
+    <input id='pass' type='password' placeholder='Password'/> 
+    <input id='conn' type='button' value='Connect'/>
+    <script type='text/javascript'>
       var esp = {
-        service: 'FF10',                                                                                          // wifi service uuid
-        ssid: 'FF11',                                                                                             // wifi ssid characteristic uuid
-        pass: 'FF12',                                                                                             // wifi password characteristic uuid
+        service: 'FF10',                                                                                   // service uuid
+        wifi: 'FF11',                                                                                      // characteristic uuid
       };
       var app = {
-        initialize: function() {
-          document.addEventListener('deviceready', this.onDeviceReady, false);
-          document.addEventListener('pause', this.onPause, false);
-          document.addEventListener('resume', this.onDeviceReady, false);
-          document.querySelector("#conn").addEventListener('click', this.onPress, false);                       // if button pressed, goto: onPress
+        initialize: () => {
+          document.addEventListener('deviceready', app.onAppReady, false);
+          document.addEventListener('resume', app.onAppReady, false);
+          document.addEventListener('pause', app.onPause, false);
+          window.addEventListener('beforeunload', app.onPause, false);
+          document.querySelector('#conn').addEventListener('click', app.onPress, false);                   // if button pressed, goto: onPress
         },
-        onDeviceReady: function() {
-          document.querySelector("#cover").style.display = "block";                                               // start in 'disconnected' mode
-          bluetooth.isEnabled(app.onEnable,function(){                                                            // if BLE enabled, goto: onEnable
-            document.querySelector("#console").innerHTML = "Bluetooth Off.";                                      // else, alert user
-          });
+        onAppReady: () => {
+          document.querySelector('#address').innerHTML = esp.id = bluetooth.getDeviceId();
+          document.querySelector('#cover').style.display = 'block';                                        // start in 'disconnected' mode
+          console.log('App ready')
+          bluetooth.isEnabled(app.onEnable, () => { app.log('Bluetooth Off') });                           // if BLE enabled, goto: onEnable
         },
-        onEnable: function() {
-          document.querySelector("#console").innerHTML = "Searching...";
-          bluetooth.connectDevice(app.onConnect, app.onDeviceReady);                                              // start BLE scan; if device connected, goto: onConnect
+        onEnable: () => {
+          app.log('Searching...');
+          bluetooth.connectDevice(app.onConnect, app.onAppReady);                                          // start BLE scan; if device connected, goto: onConnect
         },
-        onConnect: function(device) {
-          document.querySelector("#console").innerHTML = "Syncing...";
-          deviceID=device.id;
-          bluetooth.read(deviceID, esp.service, esp.onoff, app.onRead, app.onRWError);                            // read switch characteristic; if read is good, goto: onRead 
+        onConnect: (device) => {
+          app.log('Syncing...');
+          bluetooth.startNotification(esp.id, esp.service, esp.wifi, app.onRead, app.onRWError);
+          bluetooth.read(esp.id, esp.service, esp.wifi, app.onRead, app.onRWError);                        // read characteristic; if read is good, goto: onRead 
         },
-        onRead: function(data) {
-          document.querySelector("svg").setAttribute("class",((new Uint8Array(data))[0]===0x1) ? "On" : "Off");   // bulb image in 'on' or 'off' mode
-          document.querySelector("#console").innerHTML = document.querySelector("svg").getAttribute("class");     // display text: "On" or "Off"
-        },
-        onPress: function(event) {
-          if (document.querySelector("svg").getAttribute("class")!="Dis") {                                       // if image touched & bulb connected,
-            data = new Uint8Array(1);
-            data[0] = (document.querySelector("svg").getAttribute("class")=="Off") ? 0x1 : 0x0;                   // set up switch toggle write 
-            bluetooth.write(deviceID, esp.service, esp.onoff, data.buffer, app.onRead(data), app.onRWError);      // write switch characteristic; if good, goto: onRead
+        onRead: (data) => {
+          document.querySelector('#cover').style.display = 'none';
+          if (data.byteLength) {
+            var value = new TextDecoder().decode(new Uint8Array(data));
+            app.log('Connected to <i>' + value + '</i>');
+          } else {
+            app.log('Not Connected to WiFi')
           }
         },
-        onPause: function() {                                                                                     // if user leaves app, stop BLE
+        onPress: (event) => {
+            var ssid = document.querySelector('#ssid').value;
+            var pass = document.querySelector('#pass').value;
+            try { data = new TextEncoder().encode( ssid + '\0' + pass ); } 
+            catch(e) { app.log('Invalid Entry. Try again...'); }
+            app.log('Attempting connection...')
+            bluetooth.write(esp.id, esp.service, esp.wifi, data.buffer, null, app.onRWError);  // write switch characteristic; if good, goto: onRead
+        },
+        onPause: () => {                                                                                   // if user leaves app, stop BLE
           bluetooth.disconnectDevice();
           bluetooth.stopScan();
         },
-        onRWError: function() {                                                                                   // on error, try restarting BLE
-          bluetooth.isEnabled(deviceID,function(){},app.onDeviceReady);
-          bluetooth.isConnected(deviceID,function(){},app.onDeviceReady);
+        onRWError: () => {                                                                                 // on error, try restarting BLE
+          console.log('RW ERROR');
+          bluetooth.isEnabled(esp.id, null, app.onAppReady);
+          bluetooth.isConnected(esp.id, null, app.onAppReady);
+        },
+        log: (message) => {
+          document.querySelector('#console').innerHTML = '(' + message + ')';
         }
       };
-      
-      app.initialize();                                                                                           // start the app
+      app.initialize();                                                                                    // start the app
     </script>
   </body>
 </html>
