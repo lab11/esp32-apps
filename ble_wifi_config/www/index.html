@@ -58,7 +58,7 @@
         onRead: (data) => {
           document.querySelector('fieldset').disabled = false;
           if (data.byteLength > 1) {
-            app.log('Connected to <b>' +  TextDecoder().decode(data) + '</b>');
+            app.log('Connected to <b>' + new TextDecoder().decode(data) + '</b>');
           } else {
             app.log('Not Connected to WiFi');
           }
