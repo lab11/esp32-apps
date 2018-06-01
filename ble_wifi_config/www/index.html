@@ -22,7 +22,7 @@
     <div id='address'>[device]</div>
     <div id='console'>(Loading...)</div>
     <form>
-      <fieldset>
+      <fieldset disabled>
         <input id='ssid' type='text' placeholder='Network Name'/> 
         <input id='pass' type='password' placeholder='Password'/> 
         <input id='conn' type='submit' value='Connect'/>
@@ -39,7 +39,37 @@
           document.addEventListener('resume', app.onAppReady, false);
           document.addEventListener('pause', app.onPause, false);
           window.addEventListener('beforeunload', app.onPause, false);
-          document.querySelector('form').addEventListener('submit', app.onSubmit, false);      // if button pressed, goto: onPress
+          document.querySelector('form').addEventListener('submit', app.onSubmit, false);      // if button pressed, goto: onSubmit
+          if (navigator.bluetooth) 
+            app.log('<a href=\'#\' onclick=\'app.onChoose()\'>CHOOSE DEVICE</a>');
+        },
+        onChoose: () => {
+          var options = {
+            filters: [{name:"ESP_WIFI"}],
+            optionalServices: [parseInt(esp.service,16)]
+          }
+          navigator.bluetooth.requestDevice(options).then(device => {
+            esp.device = device;
+            document.querySelector('#address').innerHTML = 'ID:' + device.id;
+            device.addEventListener('gattserverdisconnected', app.onWebBleReady);
+            app.onWebBleReady();
+          });
+        }, 
+        onWebBleReady: () => {
+          esp.device.gatt.connect().then(server => {
+            app.log('Syncing...');
+            return server.getPrimaryService(parseInt(esp.service,16));
+          }).then(service => {
+            return service.getCharacteristic(parseInt(esp.wifi,16));
+          }).then(characteristic => {
+            esp.characteristic = characteristic;
+            return characteristic.readValue();
+          }).then(data => {
+            app.onRead(data);
+          }).catch(error => {
+            console.log(error);
+            app.onWebBleReady();
+          });
         },
         onAppReady: () => {
           document.querySelector('#address').innerHTML = esp.id = bluetooth.getDeviceId();
@@ -70,7 +100,10 @@
             try {
               var data = new TextEncoder().encode( ssid + '\0' + pass ); 
               app.log('Attempting connection...');
-              bluetooth.write(esp.id, esp.service, esp.wifi, data.buffer, null, app.onError);  // write characteristicz
+              if (esp.characteristic)
+                esp.characteristic.writeValue(data.buffer);
+              else
+                bluetooth.write(esp.id, esp.service, esp.wifi, data.buffer, null, app.onError);  // write characteristicz
             } catch(e) { app.log('Invalid Entry. Try again...'); }
         },
         onPause: () => {                                                                       // if user leaves app, stop BLE
