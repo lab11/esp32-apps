@@ -85,7 +85,7 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
                 ESP_LOGE(TAG,"Scan start failed: %s", esp_err_to_name(err));
             }
             else {
-                ESP_LOGI(TAG,"Start scanning...");
+                ESP_LOGI(TAG,"Start scanning...\n");
             }
             break;
         }
@@ -93,21 +93,21 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
             esp_ble_gap_cb_param_t* scan_result = (esp_ble_gap_cb_param_t*)param;
             switch(scan_result->scan_rst.search_evt) {
                 case ESP_GAP_SEARCH_INQ_RES_EVT: {
-                    /* Convert address & advertisement to hex string */
-                    char ADDR[ESP_BD_ADDR_LEN*2];
-                    char DATA[scan_result->scan_rst.adv_data_len*2];
-                    for (int i = 0; i < ESP_BD_ADDR_LEN; i++) {
-                        sprintf(ADDR+2*i, "%02x ", scan_result->scan_rst.bda[i]);
-                    }
-                    for (int i = 0; i < scan_result->scan_rst.adv_data_len; i++) {
-                        sprintf(DATA+2*i, "%02x ", scan_result->scan_rst.ble_adv[i]);
-                    }
-
-                    /* Print advertisement */
-                    // esp_log_buffer_hex("SCAN: ADDR", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
-                    ESP_LOGI(TAG, "\n  ADDR: %s \n  RSSI: %d dbm \n  DATA: %s \n", ADDR, scan_result->scan_rst.rssi, DATA);
-
                     if (connect == false) {
+                        /* Convert address & advertisement to hex string */
+                        char ADDR[ESP_BD_ADDR_LEN*2];
+                        char DATA[scan_result->scan_rst.adv_data_len*2];
+                        for (int i = 0; i < ESP_BD_ADDR_LEN; i++) {
+                            sprintf(ADDR+2*i, "%02X ", scan_result->scan_rst.bda[i]);
+                        }
+                        for (int i = 0; i < scan_result->scan_rst.adv_data_len; i++) {
+                            sprintf(DATA+2*i, "%02X ", scan_result->scan_rst.ble_adv[i]);
+                        }
+
+                        /* Print advertisement */
+                        // esp_log_buffer_hex("SCAN: ADDR", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
+                        ESP_LOGI(TAG, "---------------  DEVICE FOUND  ---------------\n\n  ADDR: %s \n  RSSI: %d dbm \n  DATA: %s \n", ADDR, scan_result->scan_rst.rssi, DATA);
+
                         connect = true;
                         ESP_LOGI(TAG, "Connecting...");
                         esp_ble_gap_stop_scanning();
@@ -129,9 +129,9 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
             break;
         }
         case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
-            ESP_LOGI(TAG, "update connection params status = %d, min_int = %d, max_int = %d,conn_int = %d,latency = %d, timeout = %d",
-                param->update_conn_params.status, param->update_conn_params.min_int, param->update_conn_params.max_int,
-                param->update_conn_params.conn_int, param->update_conn_params.latency, param->update_conn_params.timeout);
+            // ESP_LOGI(TAG, "update connection params status = %d, min_int = %d, max_int = %d,conn_int = %d,latency = %d, timeout = %d",
+                // param->update_conn_params.status, param->update_conn_params.min_int, param->update_conn_params.max_int,
+                // param->update_conn_params.conn_int, param->update_conn_params.latency, param->update_conn_params.timeout);
             break;
         default:
             break;
@@ -140,14 +140,14 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
 
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
-    ESP_LOGI(TAG, "EVT %d, gattc if %d", event, gattc_if);
+    // ESP_LOGI(TAG, "EVT %d, gattc if %d", event, gattc_if);
 
     /* If event is register event, store the gattc_if for each profile */
     if (event == ESP_GATTC_REG_EVT) {
         if (param->reg.status == ESP_GATT_OK) {
             gl_profile_tab[param->reg.app_id].gattc_if = gattc_if;
         } else {
-            ESP_LOGI(TAG, "Reg app failed, app_id %04x, status %d", param->reg.app_id, param->reg.status);
+            ESP_LOGE(TAG, "Reg app failed, app_id %04x, status %d", param->reg.app_id, param->reg.status);
             return;
         }
     }
@@ -171,19 +171,21 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     esp_ble_gattc_cb_param_t *p_data = (esp_ble_gattc_cb_param_t *)param;
 
     switch (event) {
-        case ESP_GATTC_REG_EVT:
-            ESP_LOGI(TAG, "REG_EVT");
+        case ESP_GATTC_REG_EVT: {
+            // ESP_LOGI(TAG, "REG_EVT");
             esp_err_t scan_ret = esp_ble_gap_set_scan_params(&ble_scan_params);
             if (scan_ret){
                 ESP_LOGE(TAG, "set scan params error, error code = %x", scan_ret);
             }
             break;
+        }
         case ESP_GATTC_CONNECT_EVT:{
-            ESP_LOGI(TAG, "ESP_GATTC_CONNECT_EVT conn_id %d, if %d", p_data->connect.conn_id, gattc_if);
+            // ESP_LOGI(TAG, "ESP_GATTC_CONNECT_EVT conn_id %d, if %d", p_data->connect.conn_id, gattc_if);
+            ESP_LOGI(TAG, "Connected\n");
             gl_profile_tab[PROFILE_A_APP_ID].conn_id = p_data->connect.conn_id;
             memcpy(gl_profile_tab[PROFILE_A_APP_ID].remote_bda, p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
-            ESP_LOGI(TAG, "REMOTE BDA:");
-            esp_log_buffer_hex(TAG, gl_profile_tab[PROFILE_A_APP_ID].remote_bda, sizeof(esp_bd_addr_t));
+            // ESP_LOGI(TAG, "REMOTE BDA:");
+            // esp_log_buffer_hex(TAG, gl_profile_tab[PROFILE_A_APP_ID].remote_bda, sizeof(esp_bd_addr_t));
             esp_err_t mtu_ret = esp_ble_gattc_send_mtu_req (gattc_if, p_data->connect.conn_id);
             if (mtu_ret){
                 ESP_LOGE(TAG, "config MTU error, error code = %x", mtu_ret);
@@ -195,19 +197,23 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                 ESP_LOGE(TAG, "open failed, status %d", p_data->open.status);
                 break;
             }
-            ESP_LOGI(TAG, "open success");
+            // ESP_LOGI(TAG, "open success");
             break;
         case ESP_GATTC_CFG_MTU_EVT:
             if (param->cfg_mtu.status != ESP_GATT_OK){
                 ESP_LOGE(TAG,"config mtu failed, error status = %x", param->cfg_mtu.status);
             }
-            ESP_LOGI(TAG, "ESP_GATTC_CFG_MTU_EVT, Status %d, MTU %d, conn_id %d", param->cfg_mtu.status, param->cfg_mtu.mtu, param->cfg_mtu.conn_id);
+            // ESP_LOGI(TAG, "ESP_GATTC_CFG_MTU_EVT, Status %d, MTU %d, conn_id %d", param->cfg_mtu.status, param->cfg_mtu.mtu, param->cfg_mtu.conn_id);
             esp_ble_gattc_search_service(gattc_if, param->cfg_mtu.conn_id, NULL);
             break;
         case ESP_GATTC_SEARCH_RES_EVT: {
             // ESP_LOGI(TAG, "SEARCH RES: conn_id = %x is primary service %d", p_data->search_res.conn_id, p_data->search_res.is_primary);
             // ESP_LOGI(TAG, "start handle %d end handle %d current handle value %d", p_data->search_res.start_handle, p_data->search_res.start_handle, p_data->search_res.srvc_id.inst_id);
-            ESP_LOGI(TAG, "SERVICE FOUND: %x", p_data->search_res.srvc_id.inst_id); // should print actual uuid (srvc_id.uuid)
+            char UUID[p_data->search_res.srvc_id.uuid.len];
+            for (int i = 0; i < p_data->search_res.srvc_id.uuid.len; i++) {
+                sprintf(UUID+2*i, "%02X ", p_data->search_res.srvc_id.uuid.uuid.uuid128[i]);
+            }
+            ESP_LOGI(TAG, "SERVICE FOUND: %s", UUID); // Print discovered service
             break;
         }
         case ESP_GATTC_SEARCH_CMPL_EVT:
@@ -215,12 +221,14 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                 ESP_LOGE(TAG, "search service failed, error status = %x", p_data->search_cmpl.status);
                 break;
             }
-            ESP_LOGI(TAG, "ESP_GATTC_SEARCH_CMPL_EVT");
+            // ESP_LOGI(TAG, "ESP_GATTC_SEARCH_CMPL_EVT");
+            printf("\n");
             esp_ble_gattc_close(gattc_if,p_data->connect.conn_id);
             break;
         case ESP_GATTC_DISCONNECT_EVT:
             connect = false;
-            ESP_LOGI(TAG, "ESP_GATTC_DISCONNECT_EVT, reason = %d", p_data->disconnect.reason);
+            // ESP_LOGI(TAG, "ESP_GATTC_DISCONNECT_EVT, reason = %d", p_data->disconnect.reason);
+            ESP_LOGI(TAG, "Disconnected\n");
             break;
         default:
             break;
