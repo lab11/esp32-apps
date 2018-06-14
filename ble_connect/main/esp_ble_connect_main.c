@@ -229,6 +229,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             connect = false;
             // ESP_LOGI(TAG, "ESP_GATTC_DISCONNECT_EVT, reason = %d", p_data->disconnect.reason);
             ESP_LOGI(TAG, "Disconnected\n");
+            esp_ble_gap_start_scanning(0);
             break;
         default:
             break;
