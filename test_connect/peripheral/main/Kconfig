@@ -1,0 +1,11 @@
+choice DEVICE_ROLE
+    prompt "Device Role"
+    default PERIPHERAL_SEND
+    help
+        Define device role: [Central - Receiving] reads data from [Peripheral - Sending]; [Central - Sending] writes data to [Peripheral - Receiving].
+
+config PERIPHERAL_RECEIVE
+    bool "Peripheral - Receiving"
+config PERIPHERAL_SEND
+    bool "Peripheral - Sending"
+endchoice
