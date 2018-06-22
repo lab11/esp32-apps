@@ -137,13 +137,24 @@ static int gl_sta_ssid_len;
 static esp_err_t net_event_handler(void *ctx, system_event_t *event)
 {
     switch (event->event_id) {
-    case SYSTEM_EVENT_STA_START:
+    case SYSTEM_EVENT_STA_START: {
+        size_t ssid_len = 32, pswd_len = 64;
+        nvs_open("storage", NVS_READWRITE, &storage);
+        nvs_get_str(storage, "ssid", (char*)sta_config.sta.ssid, &ssid_len);
+        nvs_get_str(storage, "pswd", (char*)sta_config.sta.password, &pswd_len);
+        nvs_close(storage);
+        esp_wifi_set_config(WIFI_IF_STA, &sta_config);
         esp_wifi_connect();
         break;
+    }
     case SYSTEM_EVENT_STA_GOT_IP: {
         xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-        esp_wifi_get_mode(&mode);
-        strcpy(wifi, (char*)sta_config.sta.ssid);
+        nvs_open("storage", NVS_READWRITE, &storage);
+        nvs_set_str(storage, "ssid", (char*)sta_config.sta.ssid);
+        nvs_set_str(storage, "pswd", (char*)sta_config.sta.password);
+        nvs_close(storage);
+        strcpy(ssid, (char*)sta_config.sta.ssid);
+        ESP_LOGI(TAG,"Connected to \"%s\" & Assigned IP",ssid);
         esp_ble_gatts_close(gl_profile_tab[PROFILE_A_APP_ID].gatts_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id);
         break;
     }
