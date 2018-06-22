@@ -38,14 +38,19 @@
 
 #define DEVICE_NAME            "ESP_WIFI"
 
-#define GATTS_DEMO_CHAR_VAL_LEN_MAX 0x40
-
 #define PREPARE_BUF_MAX_SIZE 1024
 
 #define GATTS_SERVICE_UUID_TEST_A   0xFF10
 #define GATTS_CHAR_UUID_TEST_A      0xFF11
 #define GATTS_DESCR_UUID_TEST_A     0x3333
 #define GATTS_NUM_HANDLE_TEST_A     4
+#define GATTS_DEMO_CHAR_VAL_LEN_MAX 0x40
+
+#define PROFILE_NUM 1
+#define PROFILE_A_APP_ID 0
+
+#define WIFI_LIST_NUM 10
+
 
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 
@@ -80,9 +85,6 @@ static esp_ble_adv_params_t adv_params = {
     .adv_filter_policy  = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
 };
 
-#define PROFILE_NUM 1
-#define PROFILE_A_APP_ID 0
-
 struct gatts_profile_inst {
     esp_gatts_cb_t gatts_cb;
     uint16_t gatts_if;
@@ -113,10 +115,8 @@ typedef struct {
 
 static prepare_type_env_t a_prepare_write_env;
 
-char wifi[32] = "";
-
-#define WIFI_LIST_NUM   10
-
+nvs_handle storage;
+char ssid[32] = "";
 static wifi_config_t sta_config;
 
 /* FreeRTOS event group to signal when we are connected & ready to make a request */
@@ -136,8 +136,6 @@ static int gl_sta_ssid_len;
 /* Wi-Fi Event Handlers */
 static esp_err_t net_event_handler(void *ctx, system_event_t *event)
 {
-    wifi_mode_t mode;
-
     switch (event->event_id) {
     case SYSTEM_EVENT_STA_START:
         esp_wifi_connect();
@@ -162,7 +160,7 @@ static esp_err_t net_event_handler(void *ctx, system_event_t *event)
         memset(gl_sta_ssid, 0, 32);
         memset(gl_sta_bssid, 0, 6);
         gl_sta_ssid_len = 0;
-        strcpy(wifi,"");
+        strcpy(ssid,"");
         esp_wifi_connect();
         xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
         break;
@@ -188,20 +186,6 @@ static esp_err_t net_event_handler(void *ctx, system_event_t *event)
     }
     return ESP_OK;
 }
-
-static void initialize_wifi(void)
-{
-    tcpip_adapter_init();
-    wifi_event_group = xEventGroupCreate();
-    ESP_ERROR_CHECK( esp_event_loop_init(net_event_handler, NULL) );
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
-    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
-
-    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
-    ESP_ERROR_CHECK( esp_wifi_start() );
-}
-
 
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
     switch (event) {
@@ -319,10 +303,10 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         esp_gatt_rsp_t rsp;
         memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
         rsp.attr_value.handle = param->read.handle;
-        rsp.attr_value.len = strlen(wifi);
-        ESP_LOGI(TAG, "Sending: %s", wifi);
-        for (int i=0; i<strlen(wifi); i++) {
-            rsp.attr_value.value[i] = wifi[i];
+        rsp.attr_value.len = strlen(ssid);
+        ESP_LOGI(TAG, "Sending: %s", ssid);
+        for (int i=0; i<strlen(ssid); i++) {
+            rsp.attr_value.value[i] = ssid[i];
         }
         esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
         break;
@@ -363,7 +347,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 
             } else {
                 char* value = (char*) param->write.value;
-                if (strcmp(value,wifi)) {
+                if (strcmp(value,ssid)) {
                     strcpy((char*)sta_config.sta.ssid, value);
                     strcpy((char*)sta_config.sta.password, value+strlen(value)+1);
                     ESP_LOGI(TAG, "Attempting to connect to '%s'", value);
@@ -480,7 +464,6 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
             return;
         }
     }
-
     /* If the gatts_if equal to a defineded profile, call the appropriate callback */
     do {
         int idx;
@@ -494,62 +477,44 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
-void app_main() {
-    esp_err_t ret;
+static int check(esp_err_t ret) {
+    if (ret) {
+        ESP_LOGE(TAG, "%s failed: %s\n", __func__, esp_err_to_name(ret));
+        return ret;
+    }
+    return 0;
+}
 
-    ret = nvs_flash_init();
+void app_main() {
+    /* Initialize flash */
+    esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
 
-    initialize_wifi();
+    /* Initialize Wi-Fi */
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    wifi_event_group = xEventGroupCreate();
+    tcpip_adapter_init();
+    ESP_ERROR_CHECK( esp_event_loop_init(net_event_handler, NULL) );
+    ESP_ERROR_CHECK( esp_wifi_init(&cfg) );
+    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
+    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
+    ESP_ERROR_CHECK( esp_wifi_start() );
 
+    /* Initialize Bluetooth */
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
-
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    ret = esp_bt_controller_init(&bt_cfg);
-    if (ret) {
-        ESP_LOGE(TAG, "%s initialize controller failed: %s\n", __func__, esp_err_to_name(ret));
-        return;
-    }
-
-    ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
-    if (ret) {
-        ESP_LOGE(TAG, "%s enable controller failed: %s\n", __func__, esp_err_to_name(ret));
-        return;
-    }
-    ret = esp_bluedroid_init();
-    if (ret) {
-        ESP_LOGE(TAG, "%s init bluetooth failed: %s\n", __func__, esp_err_to_name(ret));
-        return;
-    }
-    ret = esp_bluedroid_enable();
-    if (ret) {
-        ESP_LOGE(TAG, "%s enable bluetooth failed: %s\n", __func__, esp_err_to_name(ret));
-        return;
-    }
-
-    ret = esp_ble_gatts_register_callback(gatts_event_handler);
-    if (ret){
-        ESP_LOGE(TAG, "gatts register error, error code = %x", ret);
-        return;
-    }
-    ret = esp_ble_gap_register_callback(gap_event_handler);
-    if (ret){
-        ESP_LOGE(TAG, "gap register error, error code = %x", ret);
-        return;
-    }
-    ret = esp_ble_gatts_app_register(PROFILE_A_APP_ID);
-    if (ret){
-        ESP_LOGE(TAG, "gatts app register error, error code = %x", ret);
-        return;
-    }
-    esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(500);
-    if (local_mtu_ret){
-        ESP_LOGE(TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
-    }
+    if (check( esp_bt_controller_init(&bt_cfg) ) ||
+        check( esp_bt_controller_enable(ESP_BT_MODE_BLE) ) ||
+        check( esp_bluedroid_init() ) ||
+        check( esp_bluedroid_enable() ) ||
+        check( esp_ble_gatts_register_callback(gatts_event_handler) ) ||
+        check( esp_ble_gap_register_callback(gap_event_handler) ) ||
+        check( esp_ble_gatts_app_register(PROFILE_A_APP_ID) ) || 
+        check( esp_ble_gatt_set_local_mtu(500) )) 
 
     return;
 }
