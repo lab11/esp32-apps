@@ -9,7 +9,7 @@
 
 /****************************************************************************
 *
-* This file is used for BLE scan & connect.
+* This file is used for BLE scan & connect with multiple peripherals.
 *
 ****************************************************************************/
 
@@ -31,17 +31,24 @@
 
 #include "freertos/FreeRTOS.h"
 
-#define TAG  "BLE CONNECT"
-#define PROFILE_NUM      1
+#define TAG  "BLE MULTIPLE CONNECT"
+#define PROFILE_NUM 3      // supporting 3 connections (can be up to 7)
 #define PROFILE_A_APP_ID 0
+#define PROFILE_B_APP_ID 1
+#define PROFILE_C_APP_ID 2
 #define INVALID_HANDLE   0
 
-static bool connect    = false;
-
-/* declare static functions */
-static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param);
+/* Declare static functions */
+static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+
+static bool conn_device_a   = false;
+static bool conn_device_b   = false;
+static bool conn_device_c   = false;
+
+static bool is_connecting   = false;
+static bool stop_scan_done  = false;
 
 static esp_ble_scan_params_t ble_scan_params = {
     .scan_type              = BLE_SCAN_TYPE_ACTIVE,
@@ -63,12 +70,30 @@ struct gattc_profile_inst {
     esp_bd_addr_t remote_bda;
 };
 
+/* One gatt-based profile one app_id and one gattc_if, this array will store the gattc_if returned by ESP_GATTS_REG_EVT */
 static struct gattc_profile_inst gl_profile_tab[PROFILE_NUM] = {
     [PROFILE_A_APP_ID] = {
         .gattc_cb = gattc_profile_event_handler,
-        .gattc_if = ESP_GATT_IF_NONE,
+        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
     },
+    [PROFILE_B_APP_ID] = {
+        .gattc_cb = gattc_profile_event_handler,
+        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
+    },
+    [PROFILE_C_APP_ID] = {
+        .gattc_cb = gattc_profile_event_handler,
+        .gattc_if = ESP_GATT_IF_NONE,       /* Not get the gatt_if, so initial is ESP_GATT_IF_NONE */
+    },
+
 };
+
+static void start_scan(void)
+{
+    stop_scan_done = false;
+    is_connecting = false;
+    uint32_t duration = 0;
+    esp_ble_gap_start_scanning(duration);
+}
 
 static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param)
 {
@@ -76,8 +101,7 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
 
     switch(event) {
         case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT: {
-            uint32_t duration = 0;
-            esp_ble_gap_start_scanning(duration);
+            start_scan();
             break;
         }
         case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT: {
@@ -93,25 +117,34 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
             esp_ble_gap_cb_param_t* scan_result = (esp_ble_gap_cb_param_t*)param;
             switch(scan_result->scan_rst.search_evt) {
                 case ESP_GAP_SEARCH_INQ_RES_EVT: {
-                    if (connect == false) {
-                        /* Convert address & advertisement to hex string */
-                        char ADDR[ESP_BD_ADDR_LEN*2];
-                        char DATA[scan_result->scan_rst.adv_data_len*2];
-                        for (int i = 0; i < ESP_BD_ADDR_LEN; i++) {
-                            sprintf(ADDR+2*i, "%02X ", scan_result->scan_rst.bda[i]);
-                        }
-                        for (int i = 0; i < scan_result->scan_rst.adv_data_len; i++) {
-                            sprintf(DATA+2*i, "%02X ", scan_result->scan_rst.ble_adv[i]);
-                        }
+                    if (!is_connecting) {
+                        if (conn_device_a && conn_device_b && conn_device_c && !stop_scan_done){
+                            stop_scan_done = true;
+                            esp_ble_gap_stop_scanning();
+                            ESP_LOGI(TAG, "All devices are connected");
+                        } else {
+                            /* Convert address & advertisement to hex string */
+                            char ADDR[ESP_BD_ADDR_LEN*2];
+                            char DATA[scan_result->scan_rst.adv_data_len*2];
+                            for (int i = 0; i < ESP_BD_ADDR_LEN; i++) {
+                                sprintf(ADDR+2*i, "%02X ", scan_result->scan_rst.bda[i]);
+                            }
+                            for (int i = 0; i < scan_result->scan_rst.adv_data_len; i++) {
+                                sprintf(DATA+2*i, "%02X ", scan_result->scan_rst.ble_adv[i]);
+                            }
 
-                        /* Print advertisement */
-                        // esp_log_buffer_hex("SCAN: ADDR", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
-                        ESP_LOGI(TAG, "---------------  DEVICE FOUND  ---------------\n\n  ADDR: %s \n  RSSI: %d dbm \n  DATA: %s \n", ADDR, scan_result->scan_rst.rssi, DATA);
-
-                        connect = true;
-                        ESP_LOGI(TAG, "Connecting...");
-                        esp_ble_gap_stop_scanning();
-                        esp_ble_gattc_open(gl_profile_tab[PROFILE_A_APP_ID].gattc_if, scan_result->scan_rst.bda, scan_result->scan_rst.ble_addr_type, true);
+                            /* Print advertisement */
+                            // esp_log_buffer_hex("SCAN: ADDR", scan_result->scan_rst.bda, ESP_BD_ADDR_LEN);
+                            ESP_LOGI(TAG, "---------------  DEVICE FOUND  ---------------\n\n  ADDR: %s \n  RSSI: %d dbm \n  DATA: %s \n", ADDR, scan_result->scan_rst.rssi, DATA);
+                            
+                            int profile_app_id = conn_device_a ? conn_device_b ? PROFILE_C_APP_ID : PROFILE_B_APP_ID : PROFILE_A_APP_ID;
+                            conn_device_a ? conn_device_b ? (conn_device_c = true) : (conn_device_b = true) : (conn_device_a = true);
+                            ESP_LOGI(TAG, "Connecting to %s as Profile %d", ADDR, profile_app_id);
+                            stop_scan_done = true;
+                            esp_ble_gap_stop_scanning();
+                            esp_ble_gattc_open(gl_profile_tab[profile_app_id].gattc_if, scan_result->scan_rst.bda, scan_result->scan_rst.ble_addr_type, true);
+                            is_connecting = true;
+                        }
                     }
                 }
                 default:
@@ -170,6 +203,13 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 {
     esp_ble_gattc_cb_param_t *p_data = (esp_ble_gattc_cb_param_t *)param;
 
+    int profile_app_id = 0;
+    for (int idx = 0; idx < PROFILE_NUM; idx++) {
+        if (gattc_if == gl_profile_tab[idx].gattc_if) {
+            profile_app_id = idx;
+        }
+    }
+
     switch (event) {
         case ESP_GATTC_REG_EVT: {
             // ESP_LOGI(TAG, "REG_EVT");
@@ -179,24 +219,24 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             }
             break;
         }
-        case ESP_GATTC_CONNECT_EVT:{
-            // ESP_LOGI(TAG, "ESP_GATTC_CONNECT_EVT conn_id %d, if %d", p_data->connect.conn_id, gattc_if);
-            ESP_LOGI(TAG, "Connected\n");
-            gl_profile_tab[PROFILE_A_APP_ID].conn_id = p_data->connect.conn_id;
-            memcpy(gl_profile_tab[PROFILE_A_APP_ID].remote_bda, p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
-            // ESP_LOGI(TAG, "REMOTE BDA:");
-            // esp_log_buffer_hex(TAG, gl_profile_tab[PROFILE_A_APP_ID].remote_bda, sizeof(esp_bd_addr_t));
-            esp_err_t mtu_ret = esp_ble_gattc_send_mtu_req (gattc_if, p_data->connect.conn_id);
+        case ESP_GATTC_CONNECT_EVT:
+            break;
+        case ESP_GATTC_OPEN_EVT:
+            if (p_data->open.status != ESP_GATT_OK){
+                //open failed, ignore the first device, connect the second device
+                ESP_LOGE(TAG, "connect device failed, status %d", p_data->open.status);
+                (profile_app_id == PROFILE_A_APP_ID) ? (conn_device_a = false) : (profile_app_id == PROFILE_B_APP_ID) ? (conn_device_b = false) : (conn_device_c = false);
+                break;
+            }
+            memcpy(gl_profile_tab[profile_app_id].remote_bda, p_data->open.remote_bda, 6);
+            gl_profile_tab[profile_app_id].conn_id = p_data->open.conn_id;
+            ESP_LOGI(TAG, "Connected with Profile %d\n",profile_app_id);
+            esp_log_buffer_hex(TAG, p_data->open.remote_bda, sizeof(esp_bd_addr_t));
+            esp_err_t mtu_ret = esp_ble_gattc_send_mtu_req (gattc_if, p_data->open.conn_id);
             if (mtu_ret){
                 ESP_LOGE(TAG, "config MTU error, error code = %x", mtu_ret);
             }
-            break;
-        }
-        case ESP_GATTC_OPEN_EVT:
-            if (param->open.status != ESP_GATT_OK){
-                ESP_LOGE(TAG, "open failed, status %d", p_data->open.status);
-                break;
-            }
+            start_scan();
             // ESP_LOGI(TAG, "open success");
             break;
         case ESP_GATTC_CFG_MTU_EVT:
@@ -226,34 +266,13 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             esp_ble_gattc_close(gattc_if,p_data->connect.conn_id);
             break;
         case ESP_GATTC_DISCONNECT_EVT:
-            connect = false;
-            // ESP_LOGI(TAG, "ESP_GATTC_DISCONNECT_EVT, reason = %d", p_data->disconnect.reason);
-            ESP_LOGI(TAG, "Disconnected\n");
-            esp_ble_gap_start_scanning(0);
+            (profile_app_id == PROFILE_A_APP_ID) ? (conn_device_a = false) : (profile_app_id == PROFILE_B_APP_ID) ? (conn_device_b = false) : (conn_device_c = false);
+            ESP_LOGI(TAG, "Disconnected Profile %d\n",profile_app_id);
+            // start_scan(); // Start scan back up
             break;
         default:
             break;
     }
-}
-
-void esp_appRegister(void)
-{
-    esp_err_t status;
-
-    ESP_LOGI(TAG,"Register callback");
-
-    /*<! register the scan callback function to the gap module */
-    if((status = esp_ble_gap_register_callback(esp_gap_cb)) != ESP_OK) {
-        ESP_LOGE(TAG,"gap register error: %s", esp_err_to_name(status));
-        return;
-    }
-}
-
-void esp_init(void)
-{
-    esp_bluedroid_init();
-    esp_bluedroid_enable();
-    esp_appRegister();
 }
 
 void app_main()
@@ -267,11 +286,8 @@ void app_main()
     ESP_ERROR_CHECK(esp_bluedroid_enable());
     ESP_ERROR_CHECK(esp_ble_gap_register_callback(esp_gap_cb));
     ESP_ERROR_CHECK(esp_ble_gattc_register_callback(esp_gattc_cb));
-    ESP_ERROR_CHECK(esp_ble_gattc_app_register(PROFILE_A_APP_ID));
     ESP_ERROR_CHECK(esp_ble_gatt_set_local_mtu(500));
-
-    // esp_init();
-
-    /*<! set scan parameters */
-    // esp_ble_gap_set_scan_params(&ble_scan_params);
+    for (int idx = 0; idx < PROFILE_NUM; idx++) {
+        ESP_ERROR_CHECK(esp_ble_gattc_app_register(idx));
+    }
 }
