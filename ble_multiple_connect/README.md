@@ -1,6 +1,4 @@
 BLE Multiple Connection Example
 ===============================
 
-Scans for BLE devices, automatically connects and outputs services.
-
-To enable multiple connections at the same time, 
+App that can maintain connection with multiple (potentially up to 7) ESP32 peripherals.

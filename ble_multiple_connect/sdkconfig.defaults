@@ -7,3 +7,6 @@ CONFIG_BT_ENABLED=y
 
 # Disable Wi-Fi
 CONFIG_WIFI_ENABLED=n
+
+# Specify number of supported connections (up to 7)
+CONFIG_BT_ACL_CONNECTIONS=4
