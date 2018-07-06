@@ -1,0 +1,1 @@
+Example peripheral for Gateway Time Sync
