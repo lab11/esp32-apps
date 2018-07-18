@@ -14,6 +14,7 @@
 #include "esp_event_loop.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "mdns.h"
 
 #define TAG "WIFI SERVER"
 
@@ -92,6 +93,7 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event) {
 }
 
 void app_main() {
+    /* Initialize NVS */
     ESP_ERROR_CHECK( nvs_flash_init() );
 
     /* Initialize Wi-Fi */
@@ -107,6 +109,12 @@ void app_main() {
     ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
     ESP_ERROR_CHECK( esp_wifi_start() );
     xEventGroupWaitBits(wifi_group, CONNECTED_BIT, false, true, portMAX_DELAY);
+
+    /* Initialize mDNS */
+    ESP_ERROR_CHECK( mdns_init() );
+    mdns_hostname_set("esp32");
+    mdns_instance_name_set("ESP32");
+    mdns_service_add("ESP32-Server", "_http", "_tcp", 80, NULL, 0);
 
     /* Start server */
     xTaskCreate(&http_serve_task, "http_serve_task", 1024*8, NULL, 8, NULL);
