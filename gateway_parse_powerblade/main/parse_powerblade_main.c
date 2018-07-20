@@ -25,6 +25,18 @@
 #define WEB_PORT "80"
 #define WEB_URL "http://" WEB_SERVER "/s7qxyqs7"
 
+/* Structure of the POST request body to send parsed data*/
+#define BODY "{" \
+        "\"device\":\"PowerBlade\"," \
+        "\"address\": \"%s\"," \
+        "\"sequence_number\": \"%u\"," \
+        "\"rms_voltage\": \"%.2f\"," \
+        "\"power\": \"%.2f\"," \
+        "\"apparent_power\": \"%.2f\"," \
+        "\"energy\": \"%.2f\"," \
+        "\"power_factor\": \"%.2f\""\
+    "}"
+
 /* Leave as is to set Wi-Fi configuration using 'make menuconfig'
    Or set it below - ie #define WIFI_SSID "mywifissid" */
 #define WIFI_SSID CONFIG_WIFI_SSID
@@ -62,10 +74,29 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event) {
 }
 
 static void http_post_data(uint8_t * addr, uint8_t * data) {
-    /* Prepare request */
-    char REQUEST[300];
-    sprintf(REQUEST,"POST %s HTTP/1.0\r\nContent-Type:application/json\r\n\r\n{\"device\":\"PowerBlade\",\"address\": \"c098e57001a1\",\"sequence_number\": \"5546567\",\"rms_voltage\": \"120.39\",\"power\": \"1309.17\",\"apparent_power\": \"1339.42\",\"energy\": \"120603.00\",\"power_factor\": \"0.98\" }",WEB_URL);
-    ESP_LOGI(TAG, "%s", REQUEST);
+    /* Prepare request - Example AD: 02 01 06 17 ff e0 02 11 02 00 54 8a 1d 4f ff 79 09 c8 0c 83 0c b7 01 11 98 ba 42 */
+    char address[ESP_BD_ADDR_LEN*2], body[250], request[350];
+    uint32_t sequence_num   = data[9]<<24 | data[10]<<16 | data[11]<<8 | data[12];
+    uint32_t pscale         = data[13]<<8 | data[14];
+    uint32_t vscale         = data[15];
+    uint32_t whscale        = data[16];
+    uint32_t v_rms          = data[17];
+    uint32_t real_power     = data[18]<<8 | data[19];
+    uint32_t apparent_power = data[20]<<8 | data[21];
+    uint32_t watt_hours     = data[22]<<24 | data[23]<<16 | data[24]<<8 | data[25];
+    double volt_scale = vscale / 200.0;
+    double power_scale = (pscale & 0x0FFF) / pow(10.0, (pscale & 0xF000)>>12);
+    double v_rms_disp = v_rms*volt_scale;
+    double real_power_disp = real_power*power_scale;
+    double app_power_disp = apparent_power*power_scale;
+    double watt_hours_disp = volt_scale>0 ? (watt_hours << whscale)*(power_scale/3600.0) : watt_hours;
+    double pf_disp = real_power_disp / app_power_disp;
+    for (int i = 0; i < ESP_BD_ADDR_LEN; i++) {
+        sprintf(address+2*i, "%02x", addr[i]);
+    }
+    sprintf(body, BODY, address, sequence_num, v_rms_disp, real_power_disp, app_power_disp, watt_hours_disp, pf_disp);
+    sprintf(request, "POST %s HTTP/1.0\r\nContent-Type:application/json\r\nContent-Length:%d\r\n\r\n%s", WEB_URL, strlen(body), body);
+    ESP_LOGI(TAG, "%s", request);
 
     /* Send HTTP request */
     struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_STREAM }, *res;
@@ -75,7 +106,7 @@ static void http_post_data(uint8_t * addr, uint8_t * data) {
     ESP_LOGI(TAG, "Sending data"); 
     if ( !getaddrinfo(WEB_SERVER, WEB_PORT, &hints, &res) && res ) {
         if ( (s = socket(res->ai_family,res->ai_socktype,0)) >= 0 ) {
-            if (!connect(s,res->ai_addr,res->ai_addrlen) && write(s, REQUEST, strlen(REQUEST)) >= 0 &&
+            if (!connect(s,res->ai_addr,res->ai_addrlen) && write(s, request, strlen(request)) >= 0 &&
                  setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,&receiving_timeout,sizeof(receiving_timeout)) >= 0 ) {
                 do {
                     bzero(recv_buf, sizeof(recv_buf));
@@ -121,7 +152,12 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
                         ESP_LOGI(TAG, "--------Device Found----------");
                         esp_log_buffer_hex("PARSE POWERBLADE: ADDR", sr.bda, ESP_BD_ADDR_LEN);
                         esp_log_buffer_hex("PARSE POWERBLADE: DATA", sr.ble_adv, sr.adv_data_len);
-                          http_post_data(sr.bda, sr.ble_adv);
+                        int company_id = sr.ble_adv[6]<<8 | sr.ble_adv[5];
+                        if (sr.ble_adv[3]<0x17 || sr.ble_adv[7]!=0x11 || company_id != 0x02E0 || sr.ble_adv[8]!=2) {
+                            ESP_LOGE(TAG,"No parseable data in this packet");
+                        } else {
+                            http_post_data(sr.bda, sr.ble_adv);
+                        }
                         break;
                     }
                 }
