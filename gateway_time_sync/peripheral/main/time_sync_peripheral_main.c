@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
@@ -133,12 +134,8 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
             break;
         case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
             ESP_LOGI(TAG, "update connection params status = %d, min_int = %d, max_int = %d,conn_int = %d,latency = %d, timeout = %d",
-                    param->update_conn_params.status,
-                    param->update_conn_params.min_int,
-                    param->update_conn_params.max_int,
-                    param->update_conn_params.conn_int,
-                    param->update_conn_params.latency,
-                    param->update_conn_params.timeout);
+                    param->update_conn_params.status, param->update_conn_params.min_int, param->update_conn_params.max_int,
+                    param->update_conn_params.conn_int, param->update_conn_params.latency, param->update_conn_params.timeout);
             break;
         default:
             break;
@@ -178,9 +175,7 @@ void write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_e
             if (status != ESP_GATT_OK){
                 return;
             }
-            memcpy(prepare_write_env->prepare_buf + param->write.offset,
-                   param->write.value,
-                   param->write.len);
+            memcpy(prepare_write_env->prepare_buf + param->write.offset, param->write.value, param->write.len);
             prepare_write_env->prepare_len += param->write.len;
 
         } else {
@@ -210,7 +205,6 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             gl_profile_tab[PROFILE_A_APP_ID].service_id.id.inst_id = 0x00;
             gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
             gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_TEST_A;
-
             esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(DEVICE_NAME);
             if (set_dev_name_ret){
                 ESP_LOGE(TAG, "set device name failed, error code = %x", set_dev_name_ret);
@@ -226,12 +220,12 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             ESP_LOGI(TAG, "GATT_READ_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
             esp_gatt_rsp_t rsp;
             memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
+            time_t now = 0;
+            time(&now);
+            ESP_LOGI(TAG,"Responding %ld",now);
             rsp.attr_value.handle = param->read.handle;
-            rsp.attr_value.len = 4;
-            rsp.attr_value.value[0] = 0xde;
-            rsp.attr_value.value[1] = 0xad;
-            rsp.attr_value.value[2] = 0xbe;
-            rsp.attr_value.value[3] = 0xef;
+            rsp.attr_value.len = sizeof(now);
+            memcpy(rsp.attr_value.value, &now, sizeof(now));
             esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id, ESP_GATT_OK, &rsp);
             break;
         }
@@ -268,24 +262,16 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                         ESP_LOGE(TAG, "unknown descr value");
                         esp_log_buffer_hex(TAG, param->write.value, param->write.len);
                     }
-
                 } else {
                     /* Wait for time to update, set timezone, & log time */
-                    time_t *now = param->write.value;
+                    time_t *now = (time_t *) param->write.value;
                     ESP_LOGI(TAG,"Received %ld",now[0]);
                     if (now[0] > 1500000000) {
-                        struct tm timeinfo = { 0 };
-                        char strftime_buf[64];
-                        // for (int retry = 10; now < 1500000000 /* ~Jul 2017 */ && retry; --retry) {
-                        //     ESP_LOGI(TAG, "Waiting for system time to set... (%d/10)", 11-retry);
-                        //     vTaskDelay(2000 / portTICK_PERIOD_MS);
-                        //     time(&now);
-                        // }
+                        struct timeval tv = { .tv_sec = now[0], .tv_usec = 0 };
+                        settimeofday(&tv, NULL);
                         setenv("TZ", "PST8PDT,M3.2.0/2,M11.1.0", 1); // Pacific time
                         tzset();
-                        localtime_r(now, &timeinfo);
-                        strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-                        ESP_LOGI(TAG, "The current date/time in Berkeley is: %s", strftime_buf);
+                        ESP_LOGI(TAG, "Time Updated!");
                     }
                 }
             }
@@ -313,8 +299,6 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             if (add_char_ret){
                 ESP_LOGE(TAG, "add char failed, error code =%x",add_char_ret);
             }
-            break;
-        case ESP_GATTS_ADD_INCL_SRVC_EVT:
             break;
         case ESP_GATTS_ADD_CHAR_EVT: {
             uint16_t length = 0;
@@ -349,8 +333,6 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         case ESP_GATTS_START_EVT:
             ESP_LOGI(TAG, "SERVICE_START_EVT, status %d, service_handle %d\n", param->start.status, param->start.service_handle);
             break;
-        case ESP_GATTS_STOP_EVT:
-            break;
         case ESP_GATTS_CONNECT_EVT: {
             esp_ble_conn_update_params_t conn_params = {0};
             memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
@@ -369,6 +351,13 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         case ESP_GATTS_DISCONNECT_EVT:
             ESP_LOGI(TAG, "ESP_GATTS_DISCONNECT_EVT");
             esp_ble_gap_start_advertising(&adv_params);
+            struct tm timeinfo = { 0 };
+            char strftime_buf[64];
+            time_t now = 0;
+            time(&now);
+            localtime_r(&now, &timeinfo);
+            strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+            ESP_LOGI(TAG, "The current date/time in Berkeley is: %s", strftime_buf);
             break;
         case ESP_GATTS_CONF_EVT:
             ESP_LOGI(TAG, "ESP_GATTS_CONF_EVT, status %d", param->conf.status);
