@@ -51,8 +51,8 @@ const int CONNECTED_BIT = BIT0;
 static bool connected                           = false;
 static bool get_service                         = false;
 static const char remote_device_name[]          = "ESP_TIME_SYNC";
-static char *city                               = "Berkeley";
-static char *tz                                 = "PST8PDT,M3.2.0/2,M11.1.0";
+static char *city                               = "Berkeley";                 // default city
+static char *tz                                 = "PST8PDT,M3.2.0/2,M11.1.0"; // default timezone
 
 static esp_gattc_char_elem_t *char_elem_result  = NULL;
 static esp_bt_uuid_t remote_time_service_uuid   = { .len = ESP_UUID_LEN_16, .uuid = {.uuid16 = REMOTE_SERVICE_UUID} };
@@ -97,8 +97,9 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event) {
             ESP_LOGI(TAG, "Connected to Wi-Fi network");
             break;
         case SYSTEM_EVENT_STA_DISCONNECTED:
-            esp_wifi_connect();
+            ESP_LOGI(TAG, "Disconnected from Wi-Fi network");
             xEventGroupClearBits(wifi_group, CONNECTED_BIT);
+            esp_wifi_connect();
             break;
         default:
             break;
@@ -115,7 +116,7 @@ static void http_get_tz(void) {
     ESP_LOGI(TAG, "Setting timezone..."); 
     if ( !getaddrinfo("timezoneapi.io", "80", &hints, &res) && res ) {
         if ( (s = socket(res->ai_family,res->ai_socktype,0)) >= 0 ) {
-            if ( !connect(s,res->ai_addr,res->ai_addrlen) &&
+            if (!connect(s,res->ai_addr,res->ai_addrlen) &&
                  write(s, "GET /api/ip HTTP/1.0\r\nHost: timezoneapi.io\r\n\r\n", 52) >= 0 &&
                  setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,&receiving_timeout,sizeof(receiving_timeout)) >= 0 ) {
                 do {
@@ -140,10 +141,10 @@ static void http_get_tz(void) {
 }
 
 static void get_local_time(void) {
-    /* Wait for time to update */
     time_t now = 0;
     struct tm timeinfo = { 0 };
     char strftime_buf[64];
+    /* Wait for time to update */
     for (int retry = 10; now < 1500000000 /* ~Jul 2017 */; --retry) {
         ESP_LOGI(TAG, "Waiting for system time to set... (%d/10)", 11-retry);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
@@ -273,13 +274,8 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             }
             if (get_service){
                 uint16_t count = 0;
-                esp_gatt_status_t status = esp_ble_gattc_get_attr_count( gattc_if,
-                                                                        param->search_cmpl.conn_id,
-                                                                        ESP_GATT_DB_CHARACTERISTIC,
-                                                                        gl_profile_tab[PROFILE_A_APP_ID].service_start_handle,
-                                                                        gl_profile_tab[PROFILE_A_APP_ID].service_end_handle,
-                                                                        INVALID_HANDLE,
-                                                                        &count);
+                esp_gatt_status_t status = esp_ble_gattc_get_attr_count( gattc_if, param->search_cmpl.conn_id, ESP_GATT_DB_CHARACTERISTIC,
+                        gl_profile_tab[PROFILE_A_APP_ID].service_start_handle, gl_profile_tab[PROFILE_A_APP_ID].service_end_handle, INVALID_HANDLE, &count);
                 if (status != ESP_GATT_OK){
                     ESP_LOGE(TAG, "esp_ble_gattc_get_attr_count error");
                 }
@@ -287,29 +283,15 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                     char_elem_result = (esp_gattc_char_elem_t *)malloc(sizeof(esp_gattc_char_elem_t) * count);
                     if (!char_elem_result){
                         ESP_LOGE(TAG, "gattc no mem");
-                    }else {
-                        status = esp_ble_gattc_get_char_by_uuid( gattc_if,
-                                                                param->search_cmpl.conn_id,
-                                                                gl_profile_tab[PROFILE_A_APP_ID].service_start_handle,
-                                                                gl_profile_tab[PROFILE_A_APP_ID].service_end_handle,
-                                                                remote_time_char_uuid,
-                                                                char_elem_result,
-                                                                &count);
+                    } else {
+                        status = esp_ble_gattc_get_char_by_uuid( gattc_if, param->search_cmpl.conn_id, gl_profile_tab[PROFILE_A_APP_ID].service_start_handle, 
+                            gl_profile_tab[PROFILE_A_APP_ID].service_end_handle, remote_time_char_uuid, char_elem_result, &count);
                         if (status != ESP_GATT_OK){
                             ESP_LOGE(TAG, "esp_ble_gattc_get_char_by_uuid error");
                         }
                         if (count > 0 && char_elem_result[0].properties){
                             gl_profile_tab[PROFILE_A_APP_ID].char_handle = char_elem_result[0].char_handle;
-                            time_t now = 0;
-                            time(&now);
-                            ESP_LOGI(TAG,"Writing %lx",now);
-                            esp_ble_gattc_write_char( gattc_if,
-                                                    gl_profile_tab[PROFILE_A_APP_ID].conn_id,
-                                                    gl_profile_tab[PROFILE_A_APP_ID].char_handle,
-                                                    sizeof(now),
-                                                    &now,
-                                                    ESP_GATT_WRITE_TYPE_RSP,
-                                                    ESP_GATT_AUTH_REQ_NONE);
+                            esp_ble_gattc_read_char( gattc_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle, ESP_GATT_AUTH_REQ_NONE);
                         }
                     }
                     free(char_elem_result);
@@ -317,6 +299,17 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                     ESP_LOGE(TAG, "no char found");
                 }
             }
+            break;
+        case ESP_GATTC_READ_CHAR_EVT:
+                if (param->read.status == ESP_GATT_OK) {
+                    time_t *now = (time_t *) param->read.value;
+                    ESP_LOGI(TAG,"Peripheral Time: %ld",now[0]);
+                }
+                time_t now = 0;
+                time(&now);
+                ESP_LOGI(TAG,"Writing %ld",now);
+                esp_ble_gattc_write_char( gattc_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+                    sizeof(now), (uint8_t *) &now, ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
             break;
         case ESP_GATTC_WRITE_CHAR_EVT:
             if (param->write.status != ESP_GATT_OK){
