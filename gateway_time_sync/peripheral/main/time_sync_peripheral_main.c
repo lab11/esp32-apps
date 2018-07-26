@@ -218,11 +218,13 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             break;
         case ESP_GATTS_READ_EVT: {
             ESP_LOGI(TAG, "GATT_READ_EVT, conn_id %d, trans_id %d, handle %d\n", param->read.conn_id, param->read.trans_id, param->read.handle);
+            struct timeval tv = { 0, 0 };
+            char *tz = getenv("TZ");
             esp_gatt_rsp_t rsp;
             memset(&rsp, 0, sizeof(esp_gatt_rsp_t));
-            time_t now = 0;
-            time(&now);
-            ESP_LOGI(TAG,"Responding %ld",now);
+            gettimeofday(&tv,NULL);
+            uint32_t now[2] = {tv.tv_sec, tv.tv_usec};
+            ESP_LOGI(TAG,"Responding %us %uus",now[0],now[1]);
             rsp.attr_value.handle = param->read.handle;
             rsp.attr_value.len = sizeof(now);
             memcpy(rsp.attr_value.value, &now, sizeof(now));
@@ -265,9 +267,9 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                 } else {
                     /* Wait for time to update, set timezone, & log time */
                     time_t *now = (time_t *) param->write.value;
-                    ESP_LOGI(TAG,"Received %ld",now[0]);
+                    ESP_LOGI(TAG,"Received %lds %ldus",now[0],now[1]);
                     if (now[0] > 1500000000) {
-                        struct timeval tv = { .tv_sec = now[0], .tv_usec = 0 };
+                        struct timeval tv = { .tv_sec = (time_t)now[0], .tv_usec = (suseconds_t)now[1] };
                         settimeofday(&tv, NULL);
                         setenv("TZ", "PST8PDT,M3.2.0/2,M11.1.0", 1); // Pacific time
                         tzset();
@@ -357,7 +359,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             time(&now);
             localtime_r(&now, &timeinfo);
             strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-            ESP_LOGI(TAG, "The current date/time in Berkeley is: %s", strftime_buf);
+            ESP_LOGI(TAG, "The current local date/time is: %s", strftime_buf);
             break;
         case ESP_GATTS_CONF_EVT:
             ESP_LOGI(TAG, "ESP_GATTS_CONF_EVT, status %d", param->conf.status);

@@ -303,11 +303,13 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         case ESP_GATTC_READ_CHAR_EVT:
                 if (param->read.status == ESP_GATT_OK) {
                     time_t *now = (time_t *) param->read.value;
-                    ESP_LOGI(TAG,"Peripheral Time: %ld",now[0]);
+                    ESP_LOGI(TAG,"Peripheral Time: %lds %ldus",(time_t)now[0],(suseconds_t)now[1]);
                 }
-                time_t now = 0;
-                time(&now);
-                ESP_LOGI(TAG,"Writing %ld",now);
+                struct timeval tv = { 0, 0 };
+                gettimeofday(&tv,NULL);
+                char *tz = getenv("TZ");
+                uint32_t now[2] = {tv.tv_sec, tv.tv_usec};
+                ESP_LOGI(TAG,"Writing %us %uus",now[0],now[1]);
                 esp_ble_gattc_write_char( gattc_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
                     sizeof(now), (uint8_t *) &now, ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
             break;
