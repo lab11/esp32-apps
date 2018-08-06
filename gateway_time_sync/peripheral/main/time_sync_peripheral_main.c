@@ -13,26 +13,17 @@
 ****************************************************************************/
 
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
-#include "sdkconfig.h"
-
 #include "esp_bt.h"
-#include "esp_bt_defs.h"
-#include "esp_bt_main.h"
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
 #include "esp_gatts_api.h"
 #include "esp_gap_ble_api.h"
-#include "esp_system.h"
-#include "esp_log.h"
 
 #define TAG                         "TIME SYNC PERIPHERAL"
 #define DEVICE_NAME                 "ESP_TIME_SYNC"
@@ -45,6 +36,7 @@
 
 #define PROFILE_NUM                 1
 #define PROFILE_A_APP_ID            0
+#define BLINK_GPIO                  5
 
 #define PREPARE_BUF_MAX_SIZE        1024
 
@@ -395,6 +387,17 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
+void blink_task(void *pvParameter) {
+    struct timeval tv = { 0, 0 };
+    gpio_pad_select_gpio(BLINK_GPIO);
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    while(1) {
+        gettimeofday(&tv,NULL);
+        gpio_set_level(BLINK_GPIO, tv.tv_sec%2);
+        vTaskDelay( (1000 - (tv.tv_usec/1000)) / portTICK_PERIOD_MS);
+    }
+}
+
 static int check(esp_err_t ret) {
     if (ret) {
         ESP_LOGE(TAG, "%s failed: %s\n", __func__, esp_err_to_name(ret));
@@ -422,7 +425,10 @@ void app_main() {
         check( esp_ble_gatts_register_callback(gatts_event_handler) ) ||
         check( esp_ble_gap_register_callback(gap_event_handler) ) ||
         check( esp_ble_gatts_app_register(PROFILE_A_APP_ID) ) || 
-        check( esp_ble_gatt_set_local_mtu(500) )) 
+        check( esp_ble_gatt_set_local_mtu(500) )) {
+        return;
+    }
 
-    return;
+    /* Initiate blink task */
+    xTaskCreate(&blink_task, "blink_task", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
 }

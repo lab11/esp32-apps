@@ -16,6 +16,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "driver/gpio.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
@@ -40,6 +41,7 @@
 #define PROFILE_NUM      1
 #define PROFILE_A_APP_ID 0
 #define INVALID_HANDLE   0
+#define BLINK_GPIO       5
 
 /* # of restarts since 1st boot - saved in RTC memory to keep value in sleep */
 RTC_DATA_ATTR static int boot_count = 0;
@@ -330,6 +332,17 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     }
 }
 
+void blink_task(void *pvParameter) {
+    struct timeval tv = { 0, 0 };
+    gpio_pad_select_gpio(BLINK_GPIO);
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    while(1) {
+        gettimeofday(&tv,NULL);
+        gpio_set_level(BLINK_GPIO, tv.tv_sec%2);
+        vTaskDelay( (1000 - (tv.tv_usec/1000)) / portTICK_PERIOD_MS);
+    }
+}
+
 void app_main() {
     ESP_LOGI(TAG, "Boot count: %d", ++boot_count);
     ESP_ERROR_CHECK( nvs_flash_init() );
@@ -366,4 +379,7 @@ void app_main() {
     ESP_ERROR_CHECK( esp_ble_gattc_register_callback(esp_gattc_cb) );
     ESP_ERROR_CHECK( esp_ble_gattc_app_register(PROFILE_A_APP_ID) );
     ESP_ERROR_CHECK( esp_ble_gatt_set_local_mtu(500) );
+
+    /* Initiate blink task */
+    xTaskCreate(&blink_task, "blink_task", configMINIMAL_STACK_SIZE, NULL, 5, NULL);
 }
