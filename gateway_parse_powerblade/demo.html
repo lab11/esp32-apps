@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>PowerBlade Trace</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  </head>
+  <body>
+    <div id="graph"></div>
+  </body>
+  <script>
+    Plotly.plot('graph', [{ x: [], y: [], }], {
+      title: "PowerBlade Trace",
+      yaxis: { title: "True Power (Watts)" },
+      showlegend: true,
+    });
+
+    var url = "http://api.webhookinbox.com/i/j7bfVZ5k/items/";
+    var last = 0;
+    var updateGraph = uri =>
+      fetch( uri )
+        .then( response => response.json() )
+        .then( data => {
+          if (last != data.last_cursor) {
+            last = data.last_cursor;
+            items = data.items.map( item => JSON.parse( item.body ) );
+            Plotly.extendTraces( 'graph', {
+              x: [ items.map( item => new Date(item._meta.received_time) ) ],
+              y: [ items.map( item => item.power ) ],
+            }, [ 0 ] );
+            document.querySelector('#graph').data[0].name = items[0].id;
+          }
+          setTimeout( _ => updateGraph( url + "?order=created&since=id:" + last ), 1000 );
+        }).catch( error => console.log(error) );
+
+    updateGraph(url + "?order=-created&max=500");
+  </script>
+</html>
