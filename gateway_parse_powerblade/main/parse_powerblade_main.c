@@ -52,8 +52,6 @@
 static EventGroupHandle_t wifi_group;
 const int CONNECTED_BIT = BIT0;
 
-static int reset = 0;
-
 /* ID String variable & helper function */
 char gateway[17];
 static void get_id_string(uint8_t* id, char* id_string) {
@@ -107,6 +105,7 @@ static void http_post(char *body) {
     esp_http_client_handle_t client = esp_http_client_init(&config);
     esp_http_client_set_url(client, WEB_URL);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_post_field(client, body, strlen(body));
     esp_err_t err = esp_http_client_perform(client);
     if (err == ESP_OK) {
@@ -158,7 +157,6 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
                         http_post(body);
                     }
                 }
-                reset = 0;
             }
             break;
         case ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT:
@@ -170,17 +168,6 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
             break;
         default:
             break;
-    }
-}
-
-void reset_task(void *pvParameter) {
-    while(1) {
-        if (reset) {
-            esp_restart();
-        } else {
-            reset = 1;
-            vTaskDelay(15000 / portTICK_PERIOD_MS);
-        }
     }
 }
 
@@ -220,7 +207,4 @@ void app_main() {
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     sntp_setservername(0, "pool.ntp.org");
     sntp_init();
-
-    /* Initiate reset task */
-    xTaskCreate(&reset_task, "reset_task", configMINIMAL_STACK_SIZE, NULL, 10, NULL);
 }
