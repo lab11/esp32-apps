@@ -3,35 +3,42 @@
   <head>
     <title>PowerBlade Trace</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+      body {font-family:sans-serif; margin:0; text-align:center;}
+      #alert {align-items:center; background:#fec; display:flex; height:0; justify-content:center; overflow:hidden; transition:all 1s; white-space:pre-wrap;}
+    </style>
   </head>
   <body>
-    <div id="graph"></div>
+    <div id="alert">This demo uses non-HTTPS resources. If plot isn't loading, try the <a href="javascript:location=location.href.replace('https','http')">HTTP link</a> or allow mixed content on this page.</div> 
+    <h2>PowerBlade Trace</h2>
+    <div class="graph" id="power" name="True Power (W)"></div>
+    <div class="graph" id="apparent_power" name="Apparent Power (W)"></div>
+    <div class="graph" id="energy" name="Energy (Wh)"></div>
+    <div class="graph" id="rms_voltage" name="RMS Voltage (V)"></div>
+    <script>
+      var last  = 0;
+      var url   = "http://api.webhookinbox.com/i/j7bfVZ5k/items/";
+
+      /* Data request function & response/failure/success handlers */
+      var request   = uri => fetch( uri ).then( onRespond ).then( onSuccess ).catch( onFailure );
+      var onRespond = response => response.json();
+      var onFailure = error => location.protocol == "https:" ? document.querySelector("#alert").style.padding = "1.5em" : console.log(error);
+      var onSuccess = data => {
+        var items = data.items.map( item => JSON.parse( item.body ) );
+        var times = [ items.map( item => item._meta.received_time ) ];
+        /* Add data to plots */
+        document.querySelectorAll( ".graph" ).forEach( plot => {
+          Plotly.extendTraces( plot.id, { x: times, y: [ items.map( item => item[ plot.id ] ) ] }, [ 0 ] );
+          plot.data[0].name = items[0].id;
+        } );
+        /* Request new data */
+        last = data.last_cursor;
+        setTimeout( _ => request( url + "?order=created&since=cursor:" + ( last = data.last_cursor ) ), 1000 );
+      }
+
+      /* Initialize plots & send initial data request */
+      document.querySelectorAll( ".graph" ).forEach( plot => Plotly.plot( plot.id, [ { x:[], y:[] } ], { yaxis: { title: plot.getAttribute( "name" ) }, showlegend: true } ) ); 
+      request( url + "?order=created&max=500" );
+    </script>
   </body>
-  <script>
-    Plotly.plot('graph', [{ x: [], y: [], }], {
-      title: "PowerBlade Trace",
-      yaxis: { title: "True Power (Watts)" },
-      showlegend: true,
-    });
-
-    var url = "http://api.webhookinbox.com/i/j7bfVZ5k/items/";
-    var last = 0;
-    var updateGraph = uri =>
-      fetch( uri )
-        .then( response => response.json() )
-        .then( data => {
-          if (last != data.last_cursor) {
-            last = data.last_cursor;
-            items = data.items.map( item => JSON.parse( item.body ) );
-            Plotly.extendTraces( 'graph', {
-              x: [ items.map( item => new Date(item._meta.received_time) ) ],
-              y: [ items.map( item => item.power ) ],
-            }, [ 0 ] );
-            document.querySelector('#graph').data[0].name = items[0].id;
-          }
-          setTimeout( _ => updateGraph( url + "?order=created&since=id:" + last ), 1000 );
-        }).catch( error => console.log(error) );
-
-    updateGraph(url + "?order=-created&max=500");
-  </script>
 </html>
