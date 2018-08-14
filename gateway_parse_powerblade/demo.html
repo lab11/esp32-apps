@@ -6,6 +6,7 @@
     <style>
       body {font-family:sans-serif; margin:0; text-align:center;}
       #alert {align-items:center; background:#fec; display:flex; height:0; justify-content:center; overflow:hidden; transition:all 1s; white-space:pre-wrap;}
+      .js-fill {fill-opacity:0.1 !important;}
     </style>
   </head>
   <body>
@@ -16,28 +17,33 @@
     <div class="graph" id="energy" name="Energy (Wh)"></div>
     <div class="graph" id="rms_voltage" name="RMS Voltage (V)"></div>
     <script>
-      var last  = 0;
-      var url   = "http://api.webhookinbox.com/i/j7bfVZ5k/items/";
+      /* Base URL */
+      var url = "http://api.webhookinbox.com/i/j7bfVZ5k/items/";
 
-      /* Data request function & response/failure/success handlers */
-      var request   = uri => fetch( uri ).then( onRespond ).then( onSuccess ).catch( onFailure );
-      var onRespond = response => response.json();
+      /* Data request function & failure/success handlers */
+      var request   = uri => fetch( uri ).then( response => response.json() ).then( onSuccess ).catch( onFailure );
       var onFailure = error => location.protocol == "https:" ? document.querySelector("#alert").style.padding = "1.5em" : console.log(error);
       var onSuccess = data => {
-        var items = data.items.map( item => JSON.parse( item.body ) );
-        var times = [ items.map( item => item._meta.received_time ) ];
         /* Add data to plots */
-        document.querySelectorAll( ".graph" ).forEach( plot => {
-          Plotly.extendTraces( plot.id, { x: times, y: [ items.map( item => item[ plot.id ] ) ] }, [ 0 ] );
-          plot.data[0].name = items[0].id;
+        data.items.map( item => JSON.parse( item.body ) ).forEach( item => {
+          document.querySelectorAll( ".graph" ).forEach( plot => {
+            if ( plot.devices[ item.id ] != undefined ) {
+              Plotly.extendTraces( plot.id, { x: [ [ item._meta.received_time ] ], y: [ [ item[ plot.id ] ] ] }, [ plot.devices[ item.id ] ] );
+            } else {
+              plot.devices[ item.id ] = Object.keys(plot.devices).length;
+              Plotly.addTraces( plot.id, { x: [ [ item._meta.received_time ] ], y: [ [ item[ plot.id ] ] ], name: item.id, fill: "tozeroy" } );
+            }
+          } );
         } );
         /* Request new data */
-        last = data.last_cursor;
-        setTimeout( _ => request( url + "?order=created&since=cursor:" + ( last = data.last_cursor ) ), 1000 );
+        setTimeout( _ => request( url + "?order=created&since=cursor:" + data.last_cursor ), 1000 );
       }
 
       /* Initialize plots & send initial data request */
-      document.querySelectorAll( ".graph" ).forEach( plot => Plotly.plot( plot.id, [ { x:[], y:[] } ], { yaxis: { title: plot.getAttribute( "name" ) }, showlegend: true } ) ); 
+      document.querySelectorAll( ".graph" ).forEach( plot => {
+        Plotly.plot( plot.id, [], { yaxis: { title: plot.getAttribute( "name" ) }, showlegend: true } );
+        plot.devices = {};
+      } ); 
       request( url + "?order=created&max=500" );
     </script>
   </body>
