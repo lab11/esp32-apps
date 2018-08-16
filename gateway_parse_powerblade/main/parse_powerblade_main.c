@@ -52,8 +52,23 @@
 static EventGroupHandle_t wifi_group;
 const int CONNECTED_BIT = BIT0;
 
-/* ID String variable & helper function */
-char gateway[17];
+/* Strings */
+static char body[512], recv_buf[64], iso[20], gateway[17], id[17];
+
+/* Struct for parsed data */
+typedef struct {
+    uint8_t device[ESP_BD_ADDR_LEN];
+    uint32_t seq_num;
+    time_t time_received;
+    double v_rms;
+    double real_power;
+    double app_power;
+    double watt_hours;
+    double pf;
+} parsed_item;
+
+
+/* ID String helper function */
 static void get_id_string(uint8_t* id, char* id_string) {
     for (int i = 0; i < 6; i++) {
         sprintf(id_string+3*i, "%02x%s", id[i], i<5 ? ":" : "");
@@ -79,7 +94,7 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event) {
     return ESP_OK;
 }
 
-static void parse_data(char *device, char *iso, uint8_t *data, char *output) {
+static void parse_data(esp_bd_addr_t device, time_t now, uint8_t *data, parsed_item *item) {
     /* Example AD: 02 01 06 17 ff e0 02 11 02 00 54 8a 1d 4f ff 79 09 c8 0c 83 0c b7 01 11 98 ba 42 */
     uint32_t sequence_num   = data[9]<<24 | data[10]<<16 | data[11]<<8 | data[12];
     uint32_t pscale         = data[13]<<8 | data[14];
@@ -89,20 +104,27 @@ static void parse_data(char *device, char *iso, uint8_t *data, char *output) {
     uint32_t real_power     = data[18]<<8 | data[19];
     uint32_t apparent_power = data[20]<<8 | data[21];
     uint32_t watt_hours     = data[22]<<24 | data[23]<<16 | data[24]<<8 | data[25];
-    double volt_scale = vscale / 200.0;
-    double power_scale = (pscale & 0x0FFF) / pow(10.0, (pscale & 0xF000)>>12);
-    double v_rms_out = v_rms*volt_scale;
-    double real_power_out = real_power*power_scale;
-    double app_power_out = apparent_power*power_scale;
-    double watt_hours_out = volt_scale>0 ? (watt_hours << whscale)*(power_scale/3600.0) : watt_hours;
-    double pf_out = real_power_out / app_power_out;
-    sprintf(output, BODY, device, sequence_num, v_rms_out, real_power_out, app_power_out, watt_hours_out, pf_out, iso, device, gateway);
+    double volt_scale       = vscale / 200.0;
+    double power_scale      = (pscale & 0x0FFF) / pow(10.0, (pscale & 0xF000)>>12);
+    item->seq_num           = sequence_num;
+    item->time_received     = now;
+    item->v_rms             = v_rms * volt_scale;
+    item->real_power        = real_power * power_scale;
+    item->app_power         = apparent_power * power_scale;
+    item->watt_hours        = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
+    item->pf                = item->real_power / item->app_power;
+    memcpy(item->device, device, ESP_BD_ADDR_LEN);
 }
 
-static void http_post(char *body) {
+static void http_post(parsed_item *item) {
     ESP_LOGI(TAG, "HTTP POST to %s: \n\n%s\n", WEB_URL, body);
     esp_http_client_config_t config = { .url = WEB_URL };
     esp_http_client_handle_t client = esp_http_client_init(&config);
+
+    get_id_string(item->device, id);
+    strftime(iso, sizeof iso, "%FT%TZ", gmtime(&(item->time_received)));
+    sprintf(body, BODY, id, item->seq_num, item->v_rms, item->real_power, item->app_power, item->watt_hours, item->pf, iso, id, gateway);
+
     esp_http_client_set_url(client, WEB_URL);
     esp_http_client_set_method(client, HTTP_METHOD_POST);
     esp_http_client_set_header(client, "Content-Type", "application/json");
@@ -110,7 +132,6 @@ static void http_post(char *body) {
     esp_err_t err = esp_http_client_perform(client);
     if (err == ESP_OK) {
         int r;
-        char recv_buf[64];
         ESP_LOGI(TAG, "HTTP POST Status = %d, Response:", esp_http_client_get_status_code(client));
         do {
             r = esp_http_client_read(client, recv_buf, sizeof(recv_buf)-1);
@@ -141,20 +162,18 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
             if (param->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
                 struct ble_scan_result_evt_param sr = param->scan_rst;
                 if (sr.bda[0]==0xC0 && sr.bda[1]==0x98 && sr.bda[2]==0xE5 && sr.bda[3]==0x70 && sr.adv_data_len>18) {
-                    char iso[20], device[17], body[512];
                     time_t now;
                     time(&now);
-                    get_id_string(sr.bda, device);
-                    strftime(iso, sizeof iso, "%FT%TZ", gmtime(&now));
-                    ESP_LOGI(TAG, "-------- Found Device [%s] @ %s ----------", device, iso);
+                    esp_log_buffer_hex("\nPARSE POWERBLADE: >>>>>>> FOUND DEVICE", sr.bda, 6);
                     esp_log_buffer_hex("PARSE POWERBLADE: DATA", sr.ble_adv, sr.adv_data_len);
                     if (sr.ble_adv[3]<0x17 || sr.ble_adv[7]!=0x11 || sr.ble_adv[6] != 0x02 || sr.ble_adv[5] != 0xE0 || sr.ble_adv[8]!=0x02) {
                         ESP_LOGE(TAG,"No parseable data in this packet");
                     } else if (now < 1500000000) {
                         ESP_LOGE(TAG,"Still setting gateway time. Ignoring packet...");
                     } else {
-                        parse_data(device, iso, sr.ble_adv, body);
-                        http_post(body);
+                        parsed_item item;
+                        parse_data(sr.bda, now, sr.ble_adv, &item);
+                        http_post(&item);
                     }
                 }
             }
