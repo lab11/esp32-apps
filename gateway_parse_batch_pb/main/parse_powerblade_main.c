@@ -26,7 +26,7 @@
 #define WEB_URL "http://api.webhookinbox.com/i/CjHOjT40/in/"
 
 /* Structure of the POST request body to send parsed data*/
-#define BODY "{" \
+#define BODY "%s {" \
         "\"device\":\"PowerBlade\"," \
         "\"id\":\"%s\"," \
         "\"sequence_number\":\"%u\"," \
@@ -41,7 +41,7 @@
             "\"receiver\":\"esp32-gateway\"," \
             "\"gateway_id\":\"%s\"" \
         "}" \
-    "}"
+    "}%s"
 
 /* Leave as is to set Wi-Fi configuration using 'make menuconfig'
    Or set it below - ie #define WIFI_SSID "mywifissid" */
@@ -53,7 +53,7 @@ static EventGroupHandle_t wifi_group;
 const int CONNECTED_BIT = BIT0;
 
 /* Strings */
-static char body[512], recv_buf[64], iso[20], gateway[17], id[17];
+static char body[32768], recv_buf[64], iso[20], gateway[17], id[17];
 
 /* Struct for parsed data */
 typedef struct {
@@ -66,7 +66,8 @@ typedef struct {
     double watt_hours;
     double pf;
 } parsed_item;
-
+static parsed_item items[100];
+static size_t items_length = 0;
 
 /* ID String helper function */
 static void get_id_string(uint8_t* id, char* id_string) {
@@ -94,7 +95,7 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event) {
     return ESP_OK;
 }
 
-static void parse_data(esp_bd_addr_t device, time_t now, uint8_t *data, parsed_item *item) {
+static void parse_data(esp_bd_addr_t device, time_t now, uint8_t *data) {
     /* Example AD: 02 01 06 17 ff e0 02 11 02 00 54 8a 1d 4f ff 79 09 c8 0c 83 0c b7 01 11 98 ba 42 */
     uint32_t sequence_num   = data[9]<<24 | data[10]<<16 | data[11]<<8 | data[12];
     uint32_t pscale         = data[13]<<8 | data[14];
@@ -106,44 +107,55 @@ static void parse_data(esp_bd_addr_t device, time_t now, uint8_t *data, parsed_i
     uint32_t watt_hours     = data[22]<<24 | data[23]<<16 | data[24]<<8 | data[25];
     double volt_scale       = vscale / 200.0;
     double power_scale      = (pscale & 0x0FFF) / pow(10.0, (pscale & 0xF000)>>12);
-    item->seq_num           = sequence_num;
-    item->time_received     = now;
-    item->v_rms             = v_rms * volt_scale;
-    item->real_power        = real_power * power_scale;
-    item->app_power         = apparent_power * power_scale;
-    item->watt_hours        = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
-    item->pf                = item->real_power / item->app_power;
-    memcpy(item->device, device, ESP_BD_ADDR_LEN);
+    size_t n = items_length++;
+    items[n].seq_num       = sequence_num;
+    items[n].time_received = now;
+    items[n].v_rms         = v_rms * volt_scale;
+    items[n].real_power    = real_power * power_scale;
+    items[n].app_power     = apparent_power * power_scale;
+    items[n].watt_hours    = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
+    items[n].pf            = items[n].real_power / items[n].app_power;
+    memcpy(items[n].device, device, ESP_BD_ADDR_LEN);
 }
 
-static void http_post(parsed_item *item) {
-    ESP_LOGI(TAG, "HTTP POST to %s: \n\n%s\n", WEB_URL, body);
-    esp_http_client_config_t config = { .url = WEB_URL };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
+static void http_post_task() {
+    while (1) {
+        vTaskDelay( 1000 / portTICK_PERIOD_MS);
+        if (!items_length) { continue; };
+        esp_http_client_config_t config = { .url = WEB_URL };
+        esp_http_client_handle_t client = esp_http_client_init(&config);
 
-    get_id_string(item->device, id);
-    strftime(iso, sizeof iso, "%FT%TZ", gmtime(&(item->time_received)));
-    sprintf(body, BODY, id, item->seq_num, item->v_rms, item->real_power, item->app_power, item->watt_hours, item->pf, iso, id, gateway);
+        sprintf(body, "{\"items\":[");
+        for (int n=0; n<items_length; n++) {
+            get_id_string(items[n].device, id);
+            strftime(iso, sizeof iso, "%FT%TZ", gmtime(&(items[n].time_received)));
+            sprintf(body, BODY, body, id, items[n].seq_num, items[n].v_rms, items[n].real_power, items[n].app_power, items[n].watt_hours, items[n].pf, iso, id, gateway, n==items_length-1?"":",");
+        }
+        sprintf(body,"%s]}",body);
+        ESP_LOGI(TAG, "HTTP POST to %s: \n\n%s\n", WEB_URL, body);
 
-    esp_http_client_set_url(client, WEB_URL);
-    esp_http_client_set_method(client, HTTP_METHOD_POST);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_post_field(client, body, strlen(body));
-    esp_err_t err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        int r;
-        ESP_LOGI(TAG, "HTTP POST Status = %d, Response:", esp_http_client_get_status_code(client));
-        do {
-            r = esp_http_client_read(client, recv_buf, sizeof(recv_buf)-1);
-            for (int i = 0; i < r; i++) {
-                putchar(recv_buf[i]);
-            }
-        } while(r > 0);
-        putchar('\n');
-    } else {
-        ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(err));
+
+        esp_http_client_set_url(client, WEB_URL);
+        esp_http_client_set_method(client, HTTP_METHOD_POST);
+        esp_http_client_set_header(client, "Content-Type", "application/json");
+        esp_http_client_set_post_field(client, body, strlen(body));
+        esp_err_t err = esp_http_client_perform(client);
+        if (err == ESP_OK) {
+            int r;
+            items_length = 0;
+            ESP_LOGI(TAG, "HTTP POST Status = %d, Response:", esp_http_client_get_status_code(client));
+            do {
+                r = esp_http_client_read(client, recv_buf, sizeof(recv_buf)-1);
+                for (int i = 0; i < r; i++) {
+                    putchar(recv_buf[i]);
+                }
+            } while(r > 0);
+            putchar('\n');
+        } else {
+            ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(err));
+        }
+        esp_http_client_cleanup(client);
     }
-    esp_http_client_cleanup(client);
 }
 
 static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) {
@@ -171,9 +183,7 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
                     } else if (now < 1500000000) {
                         ESP_LOGE(TAG,"Still setting gateway time. Ignoring packet...");
                     } else {
-                        parsed_item item;
-                        parse_data(sr.bda, now, sr.ble_adv, &item);
-                        http_post(&item);
+                        parse_data(sr.bda, now, sr.ble_adv);
                     }
                 }
             }
@@ -226,4 +236,7 @@ void app_main() {
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     sntp_setservername(0, "pool.ntp.org");
     sntp_init();
+
+    /* Initiate looped HTTP POST task */
+    xTaskCreate(&http_post_task, "http_post_task", 32*configMINIMAL_STACK_SIZE, NULL, 10, NULL);
 }
