@@ -25,14 +25,16 @@
       var onFailure = error => location.protocol == "https:" ? document.querySelector("#alert").style.padding = "1.5em" : console.log(error);
       var onSuccess = data => {
         /* Add data to plots */
-        data.items.map( item => JSON.parse( item.body ) ).forEach( item => {
-          document.querySelectorAll( ".graph" ).forEach( plot => {
-            if ( plot.devices[ item.id ] != undefined ) {
-              Plotly.extendTraces( plot.id, { x: [ [ item._meta.received_time ] ], y: [ [ item[ plot.id ] ] ] }, [ plot.devices[ item.id ] ] );
-            } else {
-              plot.devices[ item.id ] = Object.keys(plot.devices).length;
-              Plotly.addTraces( plot.id, { x: [ [ item._meta.received_time ] ], y: [ [ item[ plot.id ] ] ], name: item.id, fill: "tozeroy" } );
-            }
+        data.items.map( item => JSON.parse( item.body ) ).forEach( items => {
+          items.items.forEach(item => {
+            document.querySelectorAll( ".graph" ).forEach( plot => {
+              if ( plot.devices[ item.id ] != undefined ) {
+                Plotly.extendTraces( plot.id, { x: [ [ item._meta.received_time ] ], y: [ [ item[ plot.id ] ] ] }, [ plot.devices[ item.id ] ] );
+              } else {
+                plot.devices[ item.id ] = Object.keys(plot.devices).length;
+                Plotly.addTraces( plot.id, { x: [ [ item._meta.received_time ] ], y: [ [ item[ plot.id ] ] ], name: item.id, fill: "tozeroy" } );
+              }
+            });
           } );
         } );
         /* Request new data */
