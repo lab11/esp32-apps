@@ -26,7 +26,7 @@
 #define WEB_URL "http://api.webhookinbox.com/i/CjHOjT40/in/"
 
 /* Structure of the POST request body to send parsed data*/
-#define BODY "%s {" \
+#define BODY "%s{" \
         "\"device\":\"PowerBlade\"," \
         "\"id\":\"%s\"," \
         "\"sequence_number\":\"%u\"," \
@@ -107,14 +107,14 @@ static void parse_data(esp_bd_addr_t device, time_t now, uint8_t *data) {
     uint32_t watt_hours     = data[22]<<24 | data[23]<<16 | data[24]<<8 | data[25];
     double volt_scale       = vscale / 200.0;
     double power_scale      = (pscale & 0x0FFF) / pow(10.0, (pscale & 0xF000)>>12);
-    size_t n = items_length++;
-    items[n].seq_num       = sequence_num;
-    items[n].time_received = now;
-    items[n].v_rms         = v_rms * volt_scale;
-    items[n].real_power    = real_power * power_scale;
-    items[n].app_power     = apparent_power * power_scale;
-    items[n].watt_hours    = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
-    items[n].pf            = items[n].real_power / items[n].app_power;
+    size_t n                = items_length++;
+    items[n].seq_num        = sequence_num;
+    items[n].time_received  = now;
+    items[n].v_rms          = v_rms * volt_scale;
+    items[n].real_power     = real_power * power_scale;
+    items[n].app_power      = apparent_power * power_scale;
+    items[n].watt_hours     = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
+    items[n].pf             = items[n].real_power / items[n].app_power;
     memcpy(items[n].device, device, ESP_BD_ADDR_LEN);
 }
 
@@ -220,7 +220,7 @@ void app_main() {
 
      /* Initialize BLE */
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    esp_ble_scan_params_t scan_params = { BLE_SCAN_TYPE_ACTIVE, BLE_ADDR_TYPE_PUBLIC, BLE_SCAN_FILTER_ALLOW_ALL, 0x50, 0x30, 0 };
+    esp_ble_scan_params_t scan_params = { BLE_SCAN_TYPE_ACTIVE, BLE_ADDR_TYPE_PUBLIC, BLE_SCAN_FILTER_ALLOW_ALL, 0x100, 0x100, BLE_SCAN_DUPLICATE_ENABLE };
     ESP_ERROR_CHECK( esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT) );
     ESP_ERROR_CHECK( esp_bt_controller_init(&bt_cfg) );
     ESP_ERROR_CHECK( esp_bt_controller_enable(ESP_BT_MODE_BLE) );

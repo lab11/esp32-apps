@@ -210,7 +210,7 @@ void app_main() {
 
      /* Initialize BLE */
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    esp_ble_scan_params_t scan_params = { BLE_SCAN_TYPE_ACTIVE, BLE_ADDR_TYPE_PUBLIC, BLE_SCAN_FILTER_ALLOW_ALL, 0x50, 0x30, 0 };
+    esp_ble_scan_params_t scan_params = { BLE_SCAN_TYPE_ACTIVE, BLE_ADDR_TYPE_PUBLIC, BLE_SCAN_FILTER_ALLOW_ALL, 0x100, 0x100, BLE_SCAN_DUPLICATE_ENABLE };
     ESP_ERROR_CHECK( esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT) );
     ESP_ERROR_CHECK( esp_bt_controller_init(&bt_cfg) );
     ESP_ERROR_CHECK( esp_bt_controller_enable(ESP_BT_MODE_BLE) );
