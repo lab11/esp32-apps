@@ -26,7 +26,7 @@
 #define URL CONFIG_HOST "/write?db=" CONFIG_DB
 
 /* Structure of the data to be sent */
-#define DAT "%sdata," \
+#define DAT "%s data," \
             "device_class=\"PowerBlade\"," \
             "device_id=\"%s\"," \
             "gateway_id=\"%s\"," \
@@ -37,34 +37,33 @@
             "apparent_power=%.2f," \
             "energy=%.2f," \
             "power_factor=%.2f " \
-            "%ld%06ld\n"
+            "%ld%06ld\n" // timestamp
 
 /* Leave as is to set Wi-Fi configuration using 'make menuconfig'
    Or set it below - ie #define WIFI_SSID "mywifissid" */
 #define WIFI_SSID CONFIG_WIFI_SSID
 #define WIFI_PASS CONFIG_WIFI_PASSWORD
 
-/* Event group & bit to signal when Wi-Fi connected */
+/* Event group to signal when Wi-Fi is connected */
 static EventGroupHandle_t wifi_group;
-const int CONNECTED_BIT = BIT0;
 
 /* Strings */
 static char body[32768], recv_buf[64], gateway[17], id[17];
 
 /* Struct for parsed data */
 typedef struct {
-    uint8_t device[ESP_BD_ADDR_LEN];
-    uint32_t seq_num;
-    time_t sec;
-    suseconds_t usec;
-    double v_rms;
-    double real_power;
-    double app_power;
-    double watt_hours;
-    double pf;
-} parsed_item;
-static parsed_item items[100];
-static size_t items_length = 0;
+    uint8_t id[ESP_BD_ADDR_LEN]; // device id
+    uint32_t sn;                 // sequence number
+    double vr;                   // rms voltage
+    double rp;                   // real power in watts
+    double ap;                   // apparent power in volt-amperes (~watts)
+    double wh;                   // energy in watt-hours
+    double pf;                   // power factor
+    time_t ts;                   // time in seconds
+    suseconds_t tu;              // remainder in µseconds
+} item;
+static item items[100];
+static int items_start = 0, items_end = 0;
 
 /* ID String helper function */
 static void get_id_string(uint8_t* id, char* id_string) {
@@ -79,12 +78,12 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event) {
             esp_wifi_connect();
             break;
         case SYSTEM_EVENT_STA_GOT_IP:
-            xEventGroupSetBits(wifi_group, CONNECTED_BIT);
+            xEventGroupSetBits(wifi_group, BIT0);
             ESP_LOGI(TAG, "Connected to network: %s", WIFI_SSID);
             break;
         case SYSTEM_EVENT_STA_DISCONNECTED:
             esp_wifi_connect();
-            xEventGroupClearBits(wifi_group, CONNECTED_BIT);
+            xEventGroupClearBits(wifi_group, BIT0);
             break;
         default:
             break;
@@ -104,53 +103,48 @@ static void parse_data(esp_bd_addr_t device, struct timeval tv, uint8_t *data) {
     uint32_t watt_hours     = data[22]<<24 | data[23]<<16 | data[24]<<8 | data[25];
     double volt_scale       = vscale / 200.0;
     double power_scale      = (pscale & 0x0FFF) / pow(10.0, (pscale & 0xF000)>>12);
-    size_t n                = items_length++;
-    items[n].seq_num        = sequence_num;
-    items[n].sec            = tv.tv_sec;
-    items[n].usec           = tv.tv_usec;
-    items[n].v_rms          = v_rms * volt_scale;
-    items[n].real_power     = real_power * power_scale;
-    items[n].app_power      = apparent_power * power_scale;
-    items[n].watt_hours     = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
-    items[n].pf             = items[n].real_power / items[n].app_power;
-    memcpy(items[n].device, device, ESP_BD_ADDR_LEN);
+    items[items_end].sn     = sequence_num;
+    items[items_end].ts     = tv.tv_sec;
+    items[items_end].tu     = tv.tv_usec;
+    items[items_end].vr     = v_rms * volt_scale;
+    items[items_end].rp     = real_power * power_scale;
+    items[items_end].ap     = apparent_power * power_scale;
+    items[items_end].wh     = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
+    items[items_end].pf     = items[items_end].rp / items[items_end].ap;
+    memcpy(items[items_end].id, device, ESP_BD_ADDR_LEN);
+    items_end = (items_end + 1) % (sizeof(items) / sizeof(item));
 }
 
 static void http_post_task() {
     while (1) {
-        vTaskDelay( 1000 / portTICK_PERIOD_MS);
-        if (!items_length) { continue; };
-        esp_http_client_config_t config = { .url = URL };
-        esp_http_client_handle_t client = esp_http_client_init(&config);
+        vTaskDelay( 5000 / portTICK_PERIOD_MS);
+        if (items_end - items_start) {
+            /* If new data is available, set up a POST request */
+            int n = items_start;
+            for (body[0] = 0; n != items_end; n = (n + 1) % (sizeof(items) / sizeof(item))) {
+                get_id_string(items[n].id, id);
+                sprintf(body, DAT, body, id, gateway, items[n].sn, items[n].vr, items[n].rp, items[n].ap, items[n].wh, items[n].pf, items[n].ts, items[n].tu);
+            }
 
-        body[0] = 0;
-        for (int n=0; n<items_length; n++) {
-            get_id_string(items[n].device, id);
-            sprintf(body, DAT, body, id, gateway, items[n].seq_num, items[n].v_rms, items[n].real_power, items[n].app_power, items[n].watt_hours, items[n].pf, items[n].sec, items[n].usec);
-        }
-        items_length = 0;
-        ESP_LOGI(TAG, "HTTP POST to %s: \n\n%s\n", URL, body);
-
-        esp_http_client_set_url(client, URL);
-        esp_http_client_set_method(client, HTTP_METHOD_POST);
-        esp_http_client_set_post_field(client, body, strlen(body));
-        esp_err_t err = esp_http_client_perform(client);
-
-        if (err == ESP_OK) {
-            int r;
-            printf("RESET %u\n",items_length);
-            ESP_LOGI(TAG, "HTTP POST Status = %d, Response:", esp_http_client_get_status_code(client));
-            do {
-                r = esp_http_client_read(client, recv_buf, sizeof(recv_buf)-1);
-                for (int i = 0; i < r; i++) {
-                    putchar(recv_buf[i]);
+            /* Send request */
+            ESP_LOGI(TAG, "HTTP POST %d Items to %s: \n\n%s\n", (n-items_start+100)%100, URL, body);
+            esp_http_client_config_t config = { .url = URL };
+            esp_http_client_handle_t client = esp_http_client_init(&config);
+            esp_http_client_set_url(client, URL);
+            esp_http_client_set_method(client, HTTP_METHOD_POST);
+            esp_http_client_set_post_field(client, body, strlen(body));
+            esp_err_t error = esp_http_client_perform(client);
+            if (error) {
+                ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(error));
+            } else {
+                ESP_LOGI(TAG, "HTTP POST Status = %d, Response:", esp_http_client_get_status_code(client));
+                items_start = esp_http_client_get_status_code(client) == 204 ? n : items_start; // update cursor on influx success (status == 204)
+                while (esp_http_client_read(client, recv_buf, sizeof(recv_buf)-1) > 0 || (putchar('\n') && 0) ) {
+                    printf(recv_buf);
                 }
-            } while(r > 0);
-            putchar('\n');
-        } else {
-            ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(err));
+            }
+            esp_http_client_cleanup(client);
         }
-        esp_http_client_cleanup(client);
     }
 }
 
@@ -212,7 +206,7 @@ void app_main() {
     ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK( esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) );
     ESP_ERROR_CHECK( esp_wifi_start() );
-    xEventGroupWaitBits(wifi_group, CONNECTED_BIT, false, true, portMAX_DELAY);
+    xEventGroupWaitBits(wifi_group, BIT0, false, true, portMAX_DELAY);
 
      /* Initialize BLE */
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
