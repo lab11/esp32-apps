@@ -1,0 +1,35 @@
+menu "Wi-Fi Configuration"
+
+config WIFI_SSID
+    string "Wi-Fi SSID"
+	default "myssid"
+	help
+		SSID (network name) for the app to connect to.
+
+config WIFI_PASSWORD
+    string "Wi-Fi Password"
+	default "mypassword"
+	help
+		Wi-Fi password (WPA or WPA2) for the app to use.
+
+		Can be left blank if the network has no security set.
+
+endmenu
+
+
+menu "ThingSpeak Configuration"
+
+config API
+	string "ThingSpeak API Key"
+	default "XXXXXXXXXXXXXXXX"
+	help
+		API Key for the destination ThingSpeak channel.
+
+config POWERBLADE
+	string "PowerBlade Address"
+	default "c0:98:e5:70:00:00"
+	help
+		BLE address of the PowerBlade to receive advertisements from.
+		Use colon-separated lowercase hex format (e.g. c0:98:e5:70:00:00).
+
+endmenu
