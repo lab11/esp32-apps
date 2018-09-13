@@ -20,24 +20,22 @@
 #include "esp_wifi.h"
 #include "esp_log.h"
 
-#define TAG "POWERBLADE INFLUX"
+#define TAG "POWERBLADE THINGSPEAK"
 
-/* Endpoint for data */
-#define URL CONFIG_HOST "/write?db=" CONFIG_DB
+/* Address of Powerblade to listen for */
+#define ADR CONFIG_POWERBLADE
 
 /* Structure of the data to be sent */
-#define DAT "%s data," \
-            "device_class=\"PowerBlade\"," \
-            "device_id=\"%s\"," \
-            "gateway_id=\"%s\"," \
-            "receiver=\"esp32-gateway\" " \
-            "sequence_number=%u," \
-            "rms_voltage=%.2f," \
-            "power=%.2f," \
-            "apparent_power=%.2f," \
-            "energy=%.2f," \
-            "power_factor=%.2f " \
-            "%ld%06ld\n" // timestamp
+#define DAT "api_key=" CONFIG_API "&" /* api key */         \
+            "field1=" ADR "&"         /* device id */       \
+            "field2=%s&"              /* gateway id */      \
+            "field3=%u&"              /* sequence number */ \
+            "field4=%.2f&"            /* rms voltage */     \
+            "field5=%.2f&"            /* real power */      \
+            "field6=%.2f&"            /* apparent power */  \
+            "field7=%.2f&"            /* energy */          \
+            "field8=%.2f&"            /* power factor */    \
+            "created_at=%ld%03ld"   /* timestamp */
 
 /* Leave as is to set Wi-Fi configuration using 'make menuconfig'
    Or set it below - ie #define WIFI_SSID "mywifissid" */
@@ -48,7 +46,7 @@
 static EventGroupHandle_t wifi_group;
 
 /* Strings */
-static char body[32768], recv_buf[64], gateway[17], id[17];
+static char body[4096], recv_buf[64], gateway[17], id[17];
 
 /* Struct for parsed data */
 typedef struct {
@@ -62,8 +60,7 @@ typedef struct {
     time_t ts;                   // time in seconds
     suseconds_t tu;              // remainder in µseconds
 } item;
-static item items[100];
-static int items_start = 0, items_end = 0;
+static item items;
 
 /* ID String helper function */
 static void get_id_string(uint8_t* id, char* id_string) {
@@ -91,7 +88,7 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event) {
     return ESP_OK;
 }
 
-static void parse_data(esp_bd_addr_t device, struct timeval tv, uint8_t *data) {
+static void parse_data(struct timeval tv, uint8_t *data) {
     /* Example AD: 02 01 06 17 ff e0 02 11 02 00 54 8a 1d 4f ff 79 09 c8 0c 83 0c b7 01 11 98 ba 42 */
     uint32_t sequence_num   = data[9]<<24 | data[10]<<16 | data[11]<<8 | data[12];
     uint32_t pscale         = data[13]<<8 | data[14];
@@ -103,48 +100,38 @@ static void parse_data(esp_bd_addr_t device, struct timeval tv, uint8_t *data) {
     uint32_t watt_hours     = data[22]<<24 | data[23]<<16 | data[24]<<8 | data[25];
     double volt_scale       = vscale / 200.0;
     double power_scale      = (pscale & 0x0FFF) / pow(10.0, (pscale & 0xF000)>>12);
-    items[items_end].sn     = sequence_num;
-    items[items_end].ts     = tv.tv_sec;
-    items[items_end].tu     = tv.tv_usec;
-    items[items_end].vr     = v_rms * volt_scale;
-    items[items_end].rp     = real_power * power_scale;
-    items[items_end].ap     = apparent_power * power_scale;
-    items[items_end].wh     = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
-    items[items_end].pf     = items[items_end].rp / items[items_end].ap;
-    memcpy(items[items_end].id, device, ESP_BD_ADDR_LEN);
-    items_end = (items_end + 1) % (sizeof(items) / sizeof(item));
+    items.sn                = sequence_num;
+    items.ts                = tv.tv_sec;
+    items.tu                = tv.tv_usec;
+    items.vr                = v_rms * volt_scale;
+    items.rp                = real_power * power_scale;
+    items.ap                = apparent_power * power_scale;
+    items.wh                = volt_scale > 0 ? (watt_hours << whscale) * (power_scale / 3600.0) : watt_hours;
+    items.pf                = items.rp / items.ap;
 }
 
 static void http_post_task() {
     while (1) {
-        vTaskDelay( 5000 / portTICK_PERIOD_MS);
-        if (items_end - items_start) {
-            /* If new data is available, set up a POST request */
-            int n = items_start;
-            for (body[0] = 0; n != items_end; n = (n + 1) % (sizeof(items) / sizeof(item))) {
-                get_id_string(items[n].id, id);
-                sprintf(body, DAT, body, id, gateway, items[n].sn, items[n].vr, items[n].rp, items[n].ap, items[n].wh, items[n].pf, items[n].ts, items[n].tu);
-            }
+        vTaskDelay( 15000 / portTICK_PERIOD_MS);
+        sprintf(body, DAT, gateway, items.sn, items.vr, items.rp, items.ap, items.wh, items.pf, items.ts, items.tu/1000);
 
-            /* Send request */
-            ESP_LOGI(TAG, "HTTP POST %d Items to %s: \n\n%s\n", (n-items_start+100)%100, URL, body);
-            esp_http_client_config_t config = { .url = URL };
-            esp_http_client_handle_t client = esp_http_client_init(&config);
-            esp_http_client_set_url(client, URL);
-            esp_http_client_set_method(client, HTTP_METHOD_POST);
-            esp_http_client_set_post_field(client, body, strlen(body));
-            esp_err_t error = esp_http_client_perform(client);
-            if (error) {
-                ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(error));
-            } else {
-                ESP_LOGI(TAG, "HTTP POST Status = %d, Response:", esp_http_client_get_status_code(client));
-                items_start = esp_http_client_get_status_code(client) == 204 ? n : items_start; // update cursor on influx success (status == 204)
-                while (esp_http_client_read(client, recv_buf, sizeof(recv_buf)-1) > 0 || (putchar('\n') && 0) ) {
-                    printf(recv_buf);
-                }
+        /* Send request */
+        esp_http_client_config_t config = { .url = "https://api.thingspeak.com/update" };
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        ESP_LOGI(TAG, "HTTP POST Item to %s: \n\n%s\n", config.url, body);
+        esp_http_client_set_url(client, config.url);
+        esp_http_client_set_method(client, HTTP_METHOD_POST);
+        esp_http_client_set_post_field(client, body, strlen(body));
+        esp_err_t error = esp_http_client_perform(client);
+        if (error) {
+            ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(error));
+        } else {
+            ESP_LOGI(TAG, "HTTP POST Status = %d, Response:", esp_http_client_get_status_code(client));
+            while (esp_http_client_read(client, recv_buf, sizeof(recv_buf)-1) > 0 || (putchar('\n') && 0) ) {
+                printf(recv_buf);
             }
-            esp_http_client_cleanup(client);
         }
+        esp_http_client_cleanup(client);
     }
 }
 
@@ -163,7 +150,8 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
         case ESP_GAP_BLE_SCAN_RESULT_EVT:
             if (param->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
                 struct ble_scan_result_evt_param sr = param->scan_rst;
-                if (sr.bda[0]==0xC0 && sr.bda[1]==0x98 && sr.bda[2]==0xE5 && sr.bda[3]==0x70 && sr.adv_data_len>18) {
+                get_id_string(sr.bda, id);
+                if (!strcmp(id,ADR)) {
                     struct timeval tv = {0, 0};
                     gettimeofday(&tv, NULL);
                     esp_log_buffer_hex("\nFOUND DEVICE", sr.bda, 6);
@@ -173,7 +161,7 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
                     } else if (tv.tv_sec < 1500000000) {
                         ESP_LOGE(TAG,"Still setting gateway time. Ignoring packet...");
                     } else {
-                        parse_data(sr.bda, tv, sr.ble_adv);
+                        parse_data(tv, sr.ble_adv);
                     }
                 }
             }
