@@ -30,11 +30,11 @@
 static const char* TAG = "SCAN";
 
 static esp_ble_scan_params_t ble_scan_params = {
-    .scan_type              = BLE_SCAN_TYPE_ACTIVE,
+    .scan_type              = BLE_SCAN_TYPE_PASSIVE,
     .own_addr_type          = BLE_ADDR_TYPE_PUBLIC,
     .scan_filter_policy     = BLE_SCAN_FILTER_ALLOW_ALL,
-    .scan_interval          = 0x100,
-    .scan_window            = 0x100
+    .scan_interval          = 0x0A0,
+    .scan_window            = 0x0A0
 };
 
 static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) {
