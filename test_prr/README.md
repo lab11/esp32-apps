@@ -8,3 +8,4 @@ Baud rate for the serial console output is set to 921600.
 Using miniterm,
 
      python -m serial.tools.miniterm <port> 921600
+

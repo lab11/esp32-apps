@@ -120,5 +120,5 @@ void app_main() {
 
     /* set scan parameters */
     esp_ble_gap_set_scan_params(&ble_scan_params);
-    printf("Staring!\n");
+    printf("Starting!\n");
 }
