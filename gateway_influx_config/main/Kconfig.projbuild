@@ -15,3 +15,21 @@ config WIFI_PASSWORD
 		Can be left blank if the network has no security set.
 
 endmenu
+
+
+menu "InfluxDB Configuration"
+
+config HOST
+	string "Default InfluxDB Host w/ protocol & port"
+	default "https://my.influx.db:8086"
+	help
+		URL of the InfluxDB endpoint to which data should be sent.
+		Include protocol (e.g. https://) & port (e.g :8086) as necessary.
+
+config DB
+	string "Default Influx Database Name"
+	default "mydb"
+	help
+		Name of the database at the endpoint to which data should be sent.
+
+endmenu

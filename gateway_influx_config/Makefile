@@ -3,7 +3,7 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := http-server
+PROJECT_NAME := gateway-config
 
 include $(IDF_PATH)/make/project.mk
 
