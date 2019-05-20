@@ -102,7 +102,7 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* par
                             printf("       Apparent Power: %.2f VA\n", app_power_disp);
                             printf("Cumulative Energy Use: %.2f Wh\n", watt_hours_disp);
                             printf("         Power Factor: %.2f\n", pf_disp);
-                            printf("                Flags: %d\n", flags);
+                            printf("                Flags: 0x%02X\n", flags);
                             printf("\n");
                         }
                     }
