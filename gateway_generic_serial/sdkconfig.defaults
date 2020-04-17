@@ -1,0 +1,12 @@
+# Auto-detect crystal frequency
+CONFIG_ESP32_XTAL_FREQ_AUTO=y
+CONFIG_ESP32_XTAL_FREQ=0
+
+# Enable BLE
+CONFIG_BT_ENABLED=y
+
+# Disable Wi-Fi
+CONFIG_WIFI_ENABLED=n
+
+# Rock that baudy
+CONFIG_CONSOLE_UART_BAUDRATE=921600
